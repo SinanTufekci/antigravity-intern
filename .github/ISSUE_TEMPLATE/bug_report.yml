@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in the bridge isn't behaving the way the README says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file an issue. This bridge talks to
+        undocumented `agy` internals, so a lot of breakage will be "agy moved
+        a file." Please fill out the version + OS info so I can tell quickly
+        whether the bug is the bridge or upstream.
+
+  - type: input
+    id: agy-version
+    attributes:
+      label: agy version
+      description: Output of `agy --version`.
+      placeholder: "1.0.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: e.g. "Windows 11 26200", "macOS 14.5", "Ubuntu 24.04".
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "3.12.4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, what did you expect, what did you get?
+      placeholder: |
+        I called `agy_ask("...")` from Claude Code and got ... instead of ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / transcript snippet
+      description: |
+        If the bridge raised an error, paste the traceback. If `agy` succeeded
+        but returned the wrong text, paste the relevant lines from
+        `~/.gemini/antigravity-cli/brain/<conv-id>/.system_generated/logs/transcript.jsonl`.
+      render: text
+    validations:
+      required: false
