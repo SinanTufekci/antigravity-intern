@@ -9,6 +9,20 @@ Use it when you want Claude to delegate a fast tool-calling task to Gemini
 file reads inside another workspace, or burning Antigravity quota instead of
 Claude tokens for cheap work.
 
+> **Heads up — read before you depend on this:**
+> - This is a workaround that reads `agy`'s **internal, undocumented** state
+>   files (`brain/.../transcript.jsonl`, `cache/last_conversations.json`). A
+>   future `agy` release can change those paths or schemas and break the
+>   bridge silently. Expect bitrot; pin to a known-good `agy` version if
+>   you're using this for anything real.
+> - It runs the **official `agy` CLI under your own AI Pro session** — no
+>   private APIs, no token theft, no quota abuse. It just bridges what the
+>   CLI already does. Still, your AI Pro / Antigravity ToS apply; you are
+>   responsible for using it within them.
+> - Personal project, **best-effort maintenance**. Issues and PRs welcome,
+>   but I make no uptime/compat promises. If `agy -p` ever starts printing
+>   to stdout correctly, this whole repo becomes a fun historical artefact.
+
 ## The problem this solves
 
 `agy 1.0.x` (verified through **1.0.1**) ships a `--print` / `-p` flag for
