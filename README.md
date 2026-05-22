@@ -141,9 +141,12 @@ tool-calling steps).
   server keeps working.
 - **No streaming**: the bridge is request/response only. `agy -p` doesn't
   stream, so neither does this.
-- **One concurrent call per workspace**: agy persists conversation state
-  per workspace; firing two `agy_continue` calls at the same workspace
-  simultaneously will race on `last_conversations.json`.
+- **Calls are serialized inside the server**: agy rewrites
+  `last_conversations.json` on every invocation, so concurrent runs would
+  race and could return the wrong conversation's transcript. The server
+  guards `_run_agy` with a `threading.Lock`, meaning additional requests
+  simply queue up rather than racing or erroring. Each `agy` call typically
+  takes 10–30 s, so plan latency accordingly under load.
 
 ## License
 

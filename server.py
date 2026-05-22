@@ -21,6 +21,7 @@ talking to agy's gRPC language server directly. Out of scope for this bridge.
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,11 @@ mcp = FastMCP("agy")
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
 BRAIN_DIR = AGY_DATA / "brain"
+
+# Serializes agy invocations within this process. Concurrent runs would race
+# on last_conversations.json (agy rewrites it on every call), so a second
+# request could pick up the first request's conversation id.
+_AGY_LOCK = threading.Lock()
 
 
 def _normalize_workspace(ws: Optional[str]) -> str:
@@ -107,31 +113,32 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
         args.append("-c")
     args.extend(["-p", prompt])
 
-    start = time.time()
-    proc = subprocess.run(
-        args,
-        cwd=workspace,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s + 30,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"agy exited {proc.returncode}\n"
-            f"stderr: {proc.stderr[-1000:]}\n"
-            f"stdout: {proc.stdout[-500:]}"
+    with _AGY_LOCK:
+        start = time.time()
+        proc = subprocess.run(
+            args,
+            cwd=workspace,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s + 30,
         )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"agy exited {proc.returncode}\n"
+                f"stderr: {proc.stderr[-1000:]}\n"
+                f"stdout: {proc.stdout[-500:]}"
+            )
 
-    time.sleep(0.3)  # let filesystem settle
+        time.sleep(0.3)  # let filesystem settle
 
-    conv_id = _read_last_conv_id(workspace) or _find_newest_conv_after(start)
-    if conv_id is None:
-        raise RuntimeError(
-            f"No conversation found after agy run (workspace={workspace}). "
-            f"Check {LAST_CONVERSATIONS} and {BRAIN_DIR}."
-        )
-    return _read_response(conv_id)
+        conv_id = _read_last_conv_id(workspace) or _find_newest_conv_after(start)
+        if conv_id is None:
+            raise RuntimeError(
+                f"No conversation found after agy run (workspace={workspace}). "
+                f"Check {LAST_CONVERSATIONS} and {BRAIN_DIR}."
+            )
+        return _read_response(conv_id)
 
 
 @mcp.tool()
