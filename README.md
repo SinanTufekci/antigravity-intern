@@ -23,12 +23,38 @@ Claude tokens for cheap work.
 >   but I make no uptime/compat promises. If `agy -p` ever starts printing
 >   to stdout correctly, this whole repo becomes a fun historical artefact.
 
+## ⚠️ Security — this runs unsandboxed code with your privileges
+
+`agy -p` runs the model as an **autonomous agent that auto-executes its own
+tools** — reading/writing files, running shell commands, and reaching the
+network — with **no approval gate and no opt-out**. This isn't a choice the
+bridge makes; it's how agy's print mode works. Verified empirically on
+**agy 1.0.4 / Windows**:
+
+- Print mode runs out-of-workspace file writes and live network fetches
+  **even without** `--dangerously-skip-permissions` — that flag is a **no-op**
+  for `-p`. There is no agy flag that disables tool execution in print mode.
+- `--sandbox` does **not** constrain filesystem writes or network egress on
+  Windows, so it buys no real protection here.
+
+**Implications:**
+
+- The `workspace` argument is only a *starting context*, **not a security
+  boundary** — the agent can and does act outside it.
+- Every call effectively runs **arbitrary code with your user privileges**.
+- Only invoke this with **trusted prompts on trusted content**. Feeding it
+  untrusted text/files is the classic prompt-injection *lethal trifecta*
+  (private-data access + code execution + network egress).
+- For real isolation, run the **whole bridge inside a container or VM**.
+
 ## The problem this solves
 
-`agy 1.0.x` (verified through **1.0.1**) ships a `--print` / `-p` flag for
-non-interactive use, but the flag is broken in non-TTY contexts: the CLI
+`agy 1.0.x` ships a `--print` / `-p` flag for non-interactive use, but the
+flag was broken in non-TTY contexts (verified through **1.0.1**): the CLI
 authenticates, sends the message, gets a response back from the model... and
 then never writes that response to stdout. Exit code is 0; pipe is empty.
+The stdout behaviour wasn't re-tested on **1.0.4**, but the on-disk
+workaround below is re-verified working there.
 
 The response *is*, however, persisted to disk under:
 
@@ -127,7 +153,8 @@ under the workspace root, and the response comes back as a plain string.
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH`
+- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file
+  layout re-verified on **1.0.4**)
 - An active Antigravity / AI Pro session
 
 The bridge itself uses only cross-platform Python (`Path.home()`,
@@ -146,13 +173,26 @@ to map `workspace → conversation id`, falling back to "newest dir under
 then streams the conversation's `transcript.jsonl`, collects every entry
 matching `source=MODEL, status=DONE, type=PLANNER_RESPONSE`, and returns the
 last one — that's the final answer (earlier ones are intermediate
-tool-calling steps).
+tool-calling steps). `agy_continue` looks up the workspace's conversation id
+first and passes it with `--conversation <id>`, so it resumes exactly that
+thread rather than agy's global "most recent".
 
 ## Status & caveats
 
-- **Stdout bug**: filed mentally as "still broken in 1.0.1". If a future
-  release fixes it, the workaround becomes redundant but harmless — the
-  server keeps working.
+- **Verified on agy 1.0.4**: base dir, `last_conversations.json`, the
+  `brain/.../transcript.jsonl` path, and the transcript schema
+  (`source=MODEL, status=DONE, type=PLANNER_RESPONSE`) are all unchanged from
+  earlier releases. The `-p`, `-c`, and `--print-timeout` flags still exist.
+  The new 1.0.4 `projects.json` is a *different* file from the
+  `last_conversations.json` this bridge reads — no impact.
+- **SQLite migration is the real risk**: agy 1.0.4 added a `.db` conversation
+  format and says it "will be the CLI's conversation format". JSONL transcripts
+  still exist today, but once `.db` becomes the default the transcript this
+  bridge parses may vanish. `_read_response` then raises a clear, SQLite-aware
+  error, and the reader will need updating to read the `.db` store. Pin to a
+  known-good `agy` version if you depend on this.
+- **Stdout bug**: verified broken through 1.0.1; not re-tested on 1.0.4. If a
+  future release fixes stdout, the workaround becomes redundant but harmless.
 - **No streaming**: the bridge is request/response only. `agy -p` doesn't
   stream, so neither does this.
 - **Calls are serialized inside the server**: agy rewrites
