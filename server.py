@@ -40,7 +40,9 @@ whole bridge inside a container or VM.
 """
 
 import json
+import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -51,6 +53,10 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("agy")
 
+# Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
+# set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
+log = logging.getLogger("agy_bridge")
+
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
 BRAIN_DIR = AGY_DATA / "brain"
@@ -59,6 +65,77 @@ BRAIN_DIR = AGY_DATA / "brain"
 # on last_conversations.json (agy rewrites it on every call), so a second
 # request could pick up the first request's conversation id.
 _AGY_LOCK = threading.Lock()
+
+# Latest agy version the bridge's state-file assumptions were verified against.
+# Newer agy releases may change paths/schemas (the SQLite migration is the known
+# risk), so we warn at startup if the installed agy is newer than this.
+VERIFIED_AGY_VERSION = (1, 0, 4)
+
+
+def _parse_agy_version(text: str) -> Optional[tuple[int, int, int]]:
+    """Extract a (major, minor, patch) tuple from `agy --version` output."""
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _compat_warning(version: Optional[tuple[int, int, int]]) -> Optional[str]:
+    """Return a warning if the installed agy is newer than we've verified.
+
+    None if the version is unknown, equal to, or older than VERIFIED_AGY_VERSION.
+    """
+    if version is None or version <= VERIFIED_AGY_VERSION:
+        return None
+    detected = ".".join(map(str, version))
+    verified = ".".join(map(str, VERIFIED_AGY_VERSION))
+    return (
+        f"agy {detected} is newer than the {verified} this bridge was verified "
+        "against. If responses look wrong or empty, agy may have changed its "
+        "state-file layout (the SQLite conversation format is the known risk). "
+        "Pin a known-good agy version if needed."
+    )
+
+
+def _debug_enabled() -> bool:
+    """True if AGY_BRIDGE_DEBUG is set to a truthy value (1/true/yes/on)."""
+    return os.environ.get("AGY_BRIDGE_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _get_agy_version() -> Optional[str]:
+    """Return `agy --version` output, or None if agy can't be run."""
+    try:
+        proc = subprocess.run(
+            ["agy", "--version"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (proc.stdout or "") + (proc.stderr or "")
+
+
+def _startup_checks() -> None:
+    """Warn (once, at startup) if the installed agy is newer than verified."""
+    warning = _compat_warning(_parse_agy_version(_get_agy_version() or ""))
+    if warning:
+        log.warning(warning)
+
+
+def _configure_logging() -> None:
+    """Route bridge logs to stderr; DEBUG when AGY_BRIDGE_DEBUG is set."""
+    handler = logging.StreamHandler()  # defaults to stderr
+    handler.setFormatter(logging.Formatter("[agy-bridge] %(levelname)s: %(message)s"))
+    log.handlers[:] = [handler]
+    log.setLevel(logging.DEBUG if _debug_enabled() else logging.WARNING)
+    log.propagate = False
 
 
 def _normalize_workspace(ws: Optional[str]) -> str:
@@ -166,6 +243,14 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
 
     with _AGY_LOCK:
         start = time.time()
+        log.debug(
+            "running agy: continue=%s pinned=%s workspace=%s timeout=%ss prompt_chars=%d",
+            continue_conv,
+            pinned_conv,
+            workspace,
+            timeout_s,
+            len(prompt),
+        )
         proc = subprocess.run(
             args,
             cwd=workspace,
@@ -174,6 +259,7 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
             text=True,
             timeout=timeout_s + 30,
         )
+        log.debug("agy exited %s in %.1fs", proc.returncode, time.time() - start)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"agy exited {proc.returncode}\n"
@@ -184,6 +270,7 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
         time.sleep(0.3)  # let filesystem settle
 
         conv_id = pinned_conv or _read_last_conv_id(workspace) or _find_newest_conv_after(start)
+        log.debug("resolved conv_id=%s", conv_id)
         if conv_id is None:
             raise RuntimeError(
                 f"No conversation found after agy run (workspace={workspace}). "
@@ -214,9 +301,7 @@ def agy_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) 
 
 
 @mcp.tool()
-def agy_continue(
-    prompt: str, workspace: Optional[str] = None, timeout_s: int = 180
-) -> str:
+def agy_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
     """Continue the Antigravity conversation rooted at this workspace.
 
     Resumes the exact conversation id recorded for `workspace` (via agy's
@@ -233,4 +318,6 @@ def agy_continue(
 
 
 if __name__ == "__main__":
+    _configure_logging()
+    _startup_checks()
     mcp.run()

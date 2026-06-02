@@ -225,6 +225,19 @@ The bridge uses only cross-platform Python (`Path.home()`, `subprocess`) and rea
 on Windows; macOS and Linux should work unmodified provided `agy -i` runs there.** If you test it on
 those platforms, please open an issue / PR to confirm.
 
+## Development
+
+```bash
+pip install -e ".[dev]"      # fastmcp + pytest + ruff
+pytest test_server.py        # offline unit tests — no agy, no quota
+ruff check . && ruff format --check .
+```
+
+`test_server.py` covers the pure parsing/version logic with temp fixtures (no agy needed);
+`test_smoke.py` is the live end-to-end check that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
+to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
+startup the server warns if your installed agy is newer than the version it was verified against.
+
 ## Contributing
 
 Personal project, **best-effort maintenance** — issues and PRs welcome, but no uptime/compat
