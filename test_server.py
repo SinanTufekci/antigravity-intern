@@ -358,10 +358,11 @@ def test_run_agy_reraises_after_poll_deadline(monkeypatch):
 @pytest.fixture
 def fake_agy(monkeypatch, brain_dir, last_conv_file):
     """Mock subprocess.run, capture args, no-op the poll sleep."""
-    cap = {"args": None, "returncode": 0, "stdout": "", "stderr": ""}
+    cap = {"args": None, "kwargs": None, "returncode": 0, "stdout": "", "stderr": ""}
 
     def fake_run(args, **kwargs):
         cap["args"] = args
+        cap["kwargs"] = kwargs
         return subprocess.CompletedProcess(
             args, cap["returncode"], stdout=cap["stdout"], stderr=cap["stderr"]
         )
@@ -384,6 +385,7 @@ def test_run_agy_continue_with_pinned_id(fake_agy, brain_dir, last_conv_file):
 def test_run_agy_continue_without_id_uses_dash_c(fake_agy, brain_dir, last_conv_file):
     last_conv_file.write_text(json.dumps({}), encoding="utf-8")
     _write_transcript(brain_dir, "newest", [_entry("PLANNER_RESPONSE", "ans")])
+    os.utime(brain_dir / "newest", (time.time() + 5, time.time() + 5))
     out = server._run_agy("hi", "C:\\ws", continue_conv=True, timeout_s=10)
     assert out == "ans"
     assert "-c" in fake_agy["args"]
@@ -419,3 +421,4 @@ def test_run_agy_args_include_print_timeout_and_prompt(fake_agy, brain_dir, last
     assert "--print-timeout" in args
     assert "42s" in args
     assert args[-2:] == ["-p", "my-prompt"]
+    assert fake_agy["kwargs"]["cwd"] == "C:\\ws"
