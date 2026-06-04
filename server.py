@@ -305,6 +305,11 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
             try:
                 return _resolve_and_read(pinned_conv, workspace, start)
             except RuntimeError:
+                # Retries transient resolution/flush lag. A persistent failure
+                # (e.g. the SQLite-migration "transcript not found" from
+                # _read_response) is caught here too and surfaces only after the
+                # deadline; that small delay is an accepted tradeoff for keeping
+                # this loop simple.
                 if time.time() >= deadline:
                     raise
                 time.sleep(_RESPONSE_POLL_INTERVAL_S)
