@@ -69,6 +69,7 @@ log = logging.getLogger("agy_bridge")
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
 BRAIN_DIR = AGY_DATA / "brain"
+CONVERSATIONS_DIR = AGY_DATA / "conversations"  # agy 1.0.4+ SQLite store
 
 # Serializes agy invocations within this process. Concurrent runs would race
 # on last_conversations.json (agy rewrites it on every call), so a second
@@ -236,6 +237,51 @@ def _read_response(conv_id: str) -> str:
     return chunks[-1]
 
 
+def _collect_status() -> list[tuple[str, bool, str]]:
+    """Gather offline setup diagnostics as (label, ok, detail) rows.
+
+    Spends no quota: only runs `agy --version` and inspects local state files.
+    """
+    rows: list[tuple[str, bool, str]] = []
+
+    version = _parse_agy_version(_get_agy_version() or "")
+    if version is None:
+        rows.append(("agy CLI", False, "not found on PATH (or --version unparseable)"))
+    else:
+        vstr = ".".join(map(str, version))
+        ok_compat = _compat_warning(version) is None
+        detail = f"v{vstr} · " + ("compat OK" if ok_compat else "newer than verified")
+        rows.append(("agy CLI", True, detail))
+
+    rows.append(("base dir", AGY_DATA.exists(), str(AGY_DATA)))
+
+    if BRAIN_DIR.exists():
+        n = sum(1 for c in BRAIN_DIR.iterdir() if c.is_dir())
+        rows.append(("brain dir", True, f"{n} conversations"))
+    else:
+        rows.append(("brain dir", False, str(BRAIN_DIR)))
+
+    rows.append(("last_conversations.json", LAST_CONVERSATIONS.exists(), str(LAST_CONVERSATIONS)))
+
+    newest = _find_newest_conv_after(0.0)
+    if newest is None:
+        rows.append(("newest transcript", True, "no conversations yet"))
+    else:
+        try:
+            _read_response(newest)
+            rows.append(("newest transcript", True, "readable"))
+        except RuntimeError as e:
+            rows.append(("newest transcript", False, str(e)[:80]))
+
+    if CONVERSATIONS_DIR.exists():
+        n = sum(1 for _ in CONVERSATIONS_DIR.glob("*.db"))
+        rows.append(("SQLite store", True, f"present · {n} .db (JSONL still primary)"))
+    else:
+        rows.append(("SQLite store", True, "absent"))
+
+    return rows
+
+
 def _resolve_and_read(pinned_conv: Optional[str], workspace: str, start: float) -> str:
     """Resolve the conversation id for this run and return its final response.
 
@@ -351,6 +397,25 @@ def agy_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 
     """
     ws = _normalize_workspace(workspace)
     return _run_agy(prompt, ws, continue_conv=True, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def agy_status() -> str:
+    """Report offline diagnostics for the agy bridge setup (spends no quota).
+
+    Checks whether agy is on PATH (and its version/compat), whether agy's state
+    directories exist, whether the newest conversation transcript is readable,
+    and whether the SQLite conversation store is present. Use this to debug
+    empty or failed responses before spending quota.
+    """
+    rows = _collect_status()
+    width = max(len(label) for label, _, _ in rows)
+    lines = ["agy bridge status"]
+    for label, ok, detail in rows:
+        mark = "ok" if ok else "!!"
+        lines.append(f"  {label.ljust(width)}  [{mark}] {detail}")
+    lines.append("Overall: " + ("OK" if all(ok for _, ok, _ in rows) else "PROBLEMS FOUND"))
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

@@ -422,3 +422,61 @@ def test_run_agy_args_include_print_timeout_and_prompt(fake_agy, brain_dir, last
     assert "42s" in args
     assert args[-2:] == ["-p", "my-prompt"]
     assert fake_agy["kwargs"]["cwd"] == "C:\\ws"
+
+
+# --------------------------------------------------------------------------
+# _collect_status
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def status_dirs(tmp_path, monkeypatch):
+    data = tmp_path / "antigravity-cli"
+    brain = data / "brain"
+    conv = data / "conversations"
+    last = data / "cache" / "last_conversations.json"
+    brain.mkdir(parents=True)
+    conv.mkdir(parents=True)
+    last.parent.mkdir(parents=True, exist_ok=True)
+    last.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(server, "AGY_DATA", data)
+    monkeypatch.setattr(server, "BRAIN_DIR", brain)
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", conv)
+    monkeypatch.setattr(server, "LAST_CONVERSATIONS", last)
+    return {"data": data, "brain": brain, "conv": conv, "last": last}
+
+
+def _status_dict(rows):
+    return {label: (ok, detail) for label, ok, detail in rows}
+
+
+def test_collect_status_all_ok(status_dirs, monkeypatch):
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
+    _write_transcript(status_dirs["brain"], "c1", [_entry("PLANNER_RESPONSE", "ans")])
+    (status_dirs["conv"] / "c1.db").write_text("", encoding="utf-8")
+    rows = server._collect_status()
+    d = _status_dict(rows)
+    assert d["agy CLI"][0] is True
+    assert d["base dir"][0] is True
+    assert d["brain dir"][0] is True
+    assert d["newest transcript"][0] is True
+    assert all(ok for _, ok, _ in rows)
+
+
+def test_collect_status_agy_missing(status_dirs, monkeypatch):
+    monkeypatch.setattr(server, "_get_agy_version", lambda: None)
+    rows = server._collect_status()
+    assert _status_dict(rows)["agy CLI"][0] is False
+
+
+def test_collect_status_dirs_absent(tmp_path, monkeypatch):
+    missing = tmp_path / "nope"
+    monkeypatch.setattr(server, "AGY_DATA", missing)
+    monkeypatch.setattr(server, "BRAIN_DIR", missing / "brain")
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", missing / "conversations")
+    monkeypatch.setattr(server, "LAST_CONVERSATIONS", missing / "cache" / "last.json")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
+    rows = server._collect_status()
+    d = _status_dict(rows)
+    assert d["base dir"][0] is False
+    assert d["brain dir"][0] is False
