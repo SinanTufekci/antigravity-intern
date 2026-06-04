@@ -250,12 +250,12 @@ def _collect_status() -> list[tuple[str, bool, str]]:
     else:
         vstr = ".".join(map(str, version))
         ok_compat = _compat_warning(version) is None
-        detail = f"v{vstr} · " + ("compat OK" if ok_compat else "newer than verified")
+        detail = f"v{vstr} - " + ("compat OK" if ok_compat else "newer than verified")
         rows.append(("agy CLI", True, detail))
 
     rows.append(("base dir", AGY_DATA.exists(), str(AGY_DATA)))
 
-    if BRAIN_DIR.exists():
+    if BRAIN_DIR.is_dir():
         n = sum(1 for c in BRAIN_DIR.iterdir() if c.is_dir())
         rows.append(("brain dir", True, f"{n} conversations"))
     else:
@@ -275,7 +275,7 @@ def _collect_status() -> list[tuple[str, bool, str]]:
 
     if CONVERSATIONS_DIR.exists():
         n = sum(1 for _ in CONVERSATIONS_DIR.glob("*.db"))
-        rows.append(("SQLite store", True, f"present · {n} .db (JSONL still primary)"))
+        rows.append(("SQLite store", True, f"present - {n} .db (JSONL still primary)"))
     else:
         rows.append(("SQLite store", True, "absent"))
 

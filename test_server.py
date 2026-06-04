@@ -480,3 +480,18 @@ def test_collect_status_dirs_absent(tmp_path, monkeypatch):
     d = _status_dict(rows)
     assert d["base dir"][0] is False
     assert d["brain dir"][0] is False
+
+
+def test_collect_status_unreadable_transcript(status_dirs, monkeypatch):
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
+    (status_dirs["brain"] / "c1").mkdir()  # conv dir exists but no transcript
+    rows = server._collect_status()
+    assert _status_dict(rows)["newest transcript"][0] is False
+
+
+def test_agy_status_formats_report(status_dirs, monkeypatch):
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
+    out = server.agy_status()
+    assert out.startswith("agy bridge status")
+    assert "[ok]" in out
+    assert "Overall:" in out
