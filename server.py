@@ -80,6 +80,12 @@ _AGY_LOCK = threading.Lock()
 # risk), so we warn at startup if the installed agy is newer than this.
 VERIFIED_AGY_VERSION = (1, 0, 5)
 
+# Poll window for the transcript/conversation-id to appear after agy exits.
+# agy has already returned 0 by the time we read, so the common case resolves
+# on the first attempt; the poll just absorbs filesystem-flush lag.
+_RESPONSE_POLL_DEADLINE_S = 5.0
+_RESPONSE_POLL_INTERVAL_S = 0.1
+
 
 def _parse_agy_version(text: str) -> Optional[tuple[int, int, int]]:
     """Extract a (major, minor, patch) tuple from `agy --version` output."""
@@ -292,8 +298,16 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
                 f"stdout: {proc.stdout[-500:]}"
             )
 
-        time.sleep(0.3)  # let filesystem settle
-        return _resolve_and_read(pinned_conv, workspace, start)
+        # agy has already exited 0, so the transcript is usually ready at once;
+        # poll briefly to absorb filesystem-flush lag instead of a fixed sleep.
+        deadline = time.time() + _RESPONSE_POLL_DEADLINE_S
+        while True:
+            try:
+                return _resolve_and_read(pinned_conv, workspace, start)
+            except RuntimeError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(_RESPONSE_POLL_INTERVAL_S)
 
 
 @mcp.tool()

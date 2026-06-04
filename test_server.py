@@ -9,6 +9,7 @@ test_smoke.py instead.
 
 import json
 import os
+import subprocess
 import time
 
 import pytest
@@ -306,3 +307,44 @@ def test_resolve_and_read_raises_when_unresolvable(brain_dir, last_conv_file):
     last_conv_file.write_text(json.dumps({}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="No conversation found"):
         server._resolve_and_read(None, "C:\\ws", time.time())
+
+
+# --------------------------------------------------------------------------
+# _run_agy bounded poll
+# --------------------------------------------------------------------------
+
+
+def _ok_proc(*args, **kwargs):
+    return subprocess.CompletedProcess(args[0] if args else [], 0, stdout="", stderr="")
+
+
+def test_run_agy_polls_until_resolve_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(pinned, ws, start):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("not ready")
+        return "answer"
+
+    monkeypatch.setattr(server.subprocess, "run", _ok_proc)
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_resolve_and_read", flaky)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 5.0)
+
+    out = server._run_agy("hi", "C:\\ws", continue_conv=False, timeout_s=10)
+    assert out == "answer"
+    assert calls["n"] == 3
+
+
+def test_run_agy_reraises_after_poll_deadline(monkeypatch):
+    def always_fail(pinned, ws, start):
+        raise RuntimeError("No conversation found after agy run")
+
+    monkeypatch.setattr(server.subprocess, "run", _ok_proc)
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_resolve_and_read", always_fail)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 0.0)
+
+    with pytest.raises(RuntimeError, match="No conversation found"):
+        server._run_agy("hi", "C:\\ws", continue_conv=False, timeout_s=10)
