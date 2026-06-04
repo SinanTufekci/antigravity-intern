@@ -101,7 +101,7 @@ using the absolute path to `server.py`:
 </td></tr>
 </table>
 
-Restart Claude Code. Two tools appear: **`mcp__agy__agy_ask`** and **`mcp__agy__agy_continue`**.
+Restart Claude Code. Three tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, and **`mcp__agy__agy_status`**.
 
 > *"Use agy_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -113,6 +113,7 @@ Restart Claude Code. Two tools appear: **`mcp__agy__agy_ask`** and **`mcp__agy__
 |---|---|
 | `agy_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
 | `agy_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
+| `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
 
 `workspace` defaults to the MCP server's current working directory. Point it at a real project dir
 for context-aware answers — agy gives the model access to files under that root.
