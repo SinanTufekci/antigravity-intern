@@ -276,3 +276,33 @@ def test_startup_checks_silent_when_agy_unavailable(monkeypatch, caplog):
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert caplog.text == ""
+
+
+# --------------------------------------------------------------------------
+# _resolve_and_read
+# --------------------------------------------------------------------------
+
+
+def test_resolve_and_read_uses_pinned_conv(brain_dir):
+    _write_transcript(brain_dir, "pinned", [_entry("PLANNER_RESPONSE", "P")])
+    assert server._resolve_and_read("pinned", "C:\\ws", time.time()) == "P"
+
+
+def test_resolve_and_read_uses_last_conv(brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({"C:\\ws": "lc"}), encoding="utf-8")
+    _write_transcript(brain_dir, "lc", [_entry("PLANNER_RESPONSE", "L")])
+    assert server._resolve_and_read(None, "C:\\ws", time.time()) == "L"
+
+
+def test_resolve_and_read_falls_back_to_newest(brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({}), encoding="utf-8")
+    start = time.time()
+    _write_transcript(brain_dir, "newest", [_entry("PLANNER_RESPONSE", "N")])
+    os.utime(brain_dir / "newest", (start + 5, start + 5))
+    assert server._resolve_and_read(None, "C:\\ws", start) == "N"
+
+
+def test_resolve_and_read_raises_when_unresolvable(brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="No conversation found"):
+        server._resolve_and_read(None, "C:\\ws", time.time())

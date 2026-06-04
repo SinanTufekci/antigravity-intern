@@ -230,6 +230,22 @@ def _read_response(conv_id: str) -> str:
     return chunks[-1]
 
 
+def _resolve_and_read(pinned_conv: Optional[str], workspace: str, start: float) -> str:
+    """Resolve the conversation id for this run and return its final response.
+
+    Resolution order: the pinned id (continue), then the workspace's recorded
+    id, then the newest brain dir touched since `start`. Raises if none resolve.
+    """
+    conv_id = pinned_conv or _read_last_conv_id(workspace) or _find_newest_conv_after(start)
+    log.debug("resolved conv_id=%s", conv_id)
+    if conv_id is None:
+        raise RuntimeError(
+            f"No conversation found after agy run (workspace={workspace}). "
+            f"Check {LAST_CONVERSATIONS} and {BRAIN_DIR}."
+        )
+    return _read_response(conv_id)
+
+
 def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -> str:
     # Note: agy's `-p` mode auto-executes all tools/commands with no approval
     # gate, so we deliberately do NOT pass --dangerously-skip-permissions (it is
@@ -277,15 +293,7 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
             )
 
         time.sleep(0.3)  # let filesystem settle
-
-        conv_id = pinned_conv or _read_last_conv_id(workspace) or _find_newest_conv_after(start)
-        log.debug("resolved conv_id=%s", conv_id)
-        if conv_id is None:
-            raise RuntimeError(
-                f"No conversation found after agy run (workspace={workspace}). "
-                f"Check {LAST_CONVERSATIONS} and {BRAIN_DIR}."
-            )
-        return _read_response(conv_id)
+        return _resolve_and_read(pinned_conv, workspace, start)
 
 
 @mcp.tool()
