@@ -2,10 +2,10 @@
 
 Exposes Antigravity CLI as MCP tools so Claude Code (or any MCP host) can
 use it as a sub-agent. Solves the headless print-mode bug in agy 1.0.x
-(verified broken through 1.0.1; stdout not re-tested on 1.0.4) by running
-`agy -p` and reading the response from agy's own transcript files instead of
-relying on stdout. State-file layout and transcript schema re-verified on
-agy 1.0.4.
+(verified broken through 1.0.1; -p still does not print the answer on 1.0.5)
+by running `agy -p` and reading the response from agy's own transcript files
+instead of relying on stdout. State-file layout and transcript schema
+re-verified on agy 1.0.5.
 
 Auth: piggybacks on whatever credential store `agy` itself uses on the host
 OS (Windows Credential Manager, macOS Keychain, libsecret on Linux). User
@@ -13,26 +13,35 @@ must have logged in interactively at least once via the Antigravity IDE or
 `agy -i`. Uses the same AI Pro quota. The bridge itself only does cross-
 platform filesystem reads under `~/.gemini/antigravity-cli/`.
 
-Model: agy print mode is hardcoded to Gemini 3.5 Flash (High). We
-verified no env var (CASCADE_DEFAULT_MODEL_OVERRIDE, AGY_MODEL, etc.) or
-settings.json field (model/modelId/selectedModel/...) overrides this — the
-print-mode default is baked in. Switching models headlessly would require
-talking to agy's gRPC language server directly. Out of scope for this bridge.
+Model: effectively the model set in agy's settings.json ("model" field,
+e.g. Gemini 3.5 Flash (High)). agy 1.0.5 added a --model flag (and a `models`
+subcommand) that IS plumbed into print mode, but switching to a DIFFERENT
+model in -p hangs the call: verified on 1.0.5 that passing the already-active
+label completes in seconds while any other label hangs >60s (print mode seems
+to wait on an interactive/backend step it never gets headless). So the bridge
+does NOT expose a model parameter — it would hang on any real switch. Change
+the model via agy's settings.json instead.
 
-Compat (agy 1.0.4): state-file paths, last_conversations.json, and the
-transcript schema are unchanged. agy 1.0.4 added a SQLite (.db) conversation
-format that it says "will be the CLI's conversation format" — once that
-becomes the default, the JSONL transcript this bridge parses may disappear
-and _read_response will need a SQLite reader (it now raises a clear,
-SQLite-aware error when the transcript is missing).
+Compat (re-verified on agy 1.0.5): state-file paths, last_conversations.json,
+and the transcript schema are unchanged, and -p still writes the JSONL
+transcript this bridge reads. agy now ALSO dual-writes every conversation to a
+SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db; the 1.0.4
+changelog says SQLite "will be the CLI's conversation format", so once JSONL
+stops being written the bridge breaks and _read_response will need a SQLite
+reader (it already raises a clear, SQLite-aware error when the transcript is
+missing). The 1.0.5 -p metadata fix also stopped agy from writing metadata to
+the cwd, so last_conversations.json now updates reliably under cache/.
 
 SECURITY — read this: `agy -p` runs the model as an autonomous agent that
 auto-executes its tools (read/write files, run shell commands, reach the
-network) with NO approval gate and NO opt-out. We verified empirically on
-agy 1.0.4 / Windows that print mode runs out-of-workspace writes and network
-fetches even WITHOUT --dangerously-skip-permissions (that flag is a no-op
-for -p), and that --sandbox does not constrain filesystem or network egress
-there. So `workspace` is only a starting context, NOT a security boundary:
+network) with NO approval gate and NO opt-out. Re-verified empirically on
+agy 1.0.5 / Windows that print mode runs out-of-workspace writes even WITHOUT
+--dangerously-skip-permissions (that flag is a no-op for -p), and that
+--sandbox does not constrain filesystem egress there. agy 1.0.5 integrated a
+permission system (its logs show toolPermission=request-review), but it still
+does NOT gate print-mode tool execution — -p created a file outside the
+workspace with no prompt. So `workspace` is only a starting context, NOT a
+security boundary:
 every call effectively runs arbitrary code with your privileges. Only invoke
 this bridge with trusted prompts on trusted content (untrusted input here is
 the classic prompt-injection "lethal trifecta"). For real isolation, run the
@@ -69,7 +78,7 @@ _AGY_LOCK = threading.Lock()
 # Latest agy version the bridge's state-file assumptions were verified against.
 # Newer agy releases may change paths/schemas (the SQLite migration is the known
 # risk), so we warn at startup if the installed agy is newer than this.
-VERIFIED_AGY_VERSION = (1, 0, 4)
+VERIFIED_AGY_VERSION = (1, 0, 5)
 
 
 def _parse_agy_version(text: str) -> Optional[tuple[int, int, int]]:

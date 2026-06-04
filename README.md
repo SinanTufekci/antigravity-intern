@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
-[![agy 1.0.4 verified](https://img.shields.io/badge/agy-1.0.4%20verified-2ea44f)](https://antigravity.google/)
+[![agy 1.0.5 verified](https://img.shields.io/badge/agy-1.0.5%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 
 </div>
@@ -119,10 +119,13 @@ for context-aware answers — agy gives the model access to files under that roo
 
 ## Model & auth
 
-- **Model:** always **Gemini 3.5 Flash (High)**. `agy -p` hardcodes the print-mode model; no env
-  var (`CASCADE_DEFAULT_MODEL_OVERRIDE`, `AGY_MODEL`, …) or `settings.json` field overrides it.
-  Flash High is speed-optimized for tool-calling, so this fits best as a *fast sub-agent for cheap
-  work*, not a heavy reasoning partner.
+- **Model:** effectively **Gemini 3.5 Flash (High)** — whatever the `"model"` field in agy's
+  `settings.json` is set to. agy 1.0.5 added a `--model` flag (and a `models` subcommand) that *is*
+  wired into print mode, but **switching to a different model in `-p` hangs the call** (verified on
+  1.0.5: passing the already-active label returns in seconds, any other label hangs >60 s). So the
+  bridge stays single-model; change it via agy's `settings.json` if you need a different one. Flash
+  High is speed-optimized for tool-calling, so this fits best as a *fast sub-agent for cheap work*,
+  not a heavy reasoning partner.
 - **Auth:** piggybacks whatever credential store `agy` uses on your OS (Windows Credential Manager,
   macOS Keychain, libsecret on Linux — the bridge never touches it directly). Log in once; every
   call after that silent-auths on the **same AI Pro quota** you already pay for.
@@ -133,12 +136,15 @@ for context-aware answers — agy gives the model access to files under that roo
 
 `agy -p` runs the model as an **autonomous agent that auto-executes its own tools** — reading and
 writing files, running shell commands, and reaching the network — with **no approval gate and no
-opt-out**. This isn't a choice the bridge makes; it's how agy's print mode works. Verified
-empirically on **agy 1.0.4 / Windows**:
+opt-out**. This isn't a choice the bridge makes; it's how agy's print mode works. Re-verified
+empirically on **agy 1.0.5 / Windows**:
 
 - Print mode runs out-of-workspace file writes and live network fetches **even without**
   `--dangerously-skip-permissions` — that flag is a **no-op** for `-p`. There is **no** agy flag
   that disables tool execution in print mode.
+- agy 1.0.5 integrated a permission system (its logs show `toolPermission=request-review`), but it
+  **still does not gate print-mode execution** — a fresh `-p` run created a file outside the
+  workspace with no prompt.
 - `--sandbox` does **not** constrain filesystem writes or network egress on Windows, so it buys no
   real protection here.
 
@@ -168,17 +174,21 @@ apply, and you're responsible for staying within them.
 <summary><b>Will it break when agy updates?</b></summary>
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
-schemas and break it silently. Re-verified working on **1.0.4**. The known future risk is agy's
-**SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): once JSONL
-transcripts stop being written, the reader needs updating. Pin a known-good `agy` version if you
-depend on this.
+schemas and break it silently. Re-verified working on **1.0.5** (transcript schema and `-p` JSONL
+output unchanged; live smoke test passes). The known future risk is agy's **SQLite (`.db`)
+conversation format** (added in 1.0.4, slated to become the default): agy 1.0.5 already
+**dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db` alongside
+the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
+known-good `agy` version if you depend on this.
 </details>
 
 <details>
 <summary><b>Why only Gemini 3.5 Flash?</b></summary>
 
-`agy -p` hardcodes the print-mode model. Switching it headlessly would mean talking to agy's gRPC
-language server directly — out of scope for this bridge.
+agy 1.0.5 added a `--model` flag, but switching to a different model in `-p` **hangs** (print mode
+waits on a step it never gets headless), so in practice you get whatever model agy's `settings.json`
+selects — Gemini 3.5 Flash (High) by default. The bridge doesn't expose a model knob because it
+would hang on any real switch.
 </details>
 
 <details>
@@ -204,20 +214,22 @@ requests queue rather than race — plan latency accordingly under load.
 
 ## Status & caveats
 
-- ✅ **Verified on agy 1.0.4** — base dir, `last_conversations.json`, the
+- ✅ **Verified on agy 1.0.5** — base dir, `last_conversations.json`, the
   `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
-  flags are all unchanged. (The new 1.0.4 `projects.json` is a *different* file from the one the
-  bridge reads — no impact.)
-- ⏳ **SQLite migration is the real risk** — see the [FAQ](#faq). `_read_response` raises a clear,
-  SQLite-aware error if the JSONL transcript ever disappears.
-- 🐛 **Stdout bug** — verified broken through 1.0.1; not re-tested on 1.0.4. If a future release
-  fixes stdout, this workaround becomes redundant but harmless.
-- 🔒 **No real sandbox** — see [Security](#security).
+  flags are all unchanged; a live smoke test passes both round-trips. The 1.0.5 `-p` metadata fix
+  also means agy no longer litters the workspace dir.
+- ⏳ **SQLite migration is the real risk** — agy 1.0.5 already dual-writes a `.db` per conversation;
+  see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
+  ever disappears.
+- 🐛 **Stdout bug** — `-p` still doesn't print the answer on 1.0.5. If a future release fixes
+  stdout, this workaround becomes redundant but harmless.
+- 🔒 **No real sandbox** — agy 1.0.5's new permission system still doesn't gate `-p`; see
+  [Security](#security).
 
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.4**)
+- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.5**)
 - An active Antigravity / AI Pro session
 
 The bridge uses only cross-platform Python (`Path.home()`, `subprocess`) and reads paths under
