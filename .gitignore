@@ -11,3 +11,10 @@ venv/
 .idea/
 .vscode/
 *.log
+
+# Test/lint tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Local-only superpowers planning/spec docs — keep these out of the public repo.
+docs/superpowers/
