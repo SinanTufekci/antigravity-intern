@@ -2,10 +2,10 @@
 
 Exposes Antigravity CLI as MCP tools so Claude Code (or any MCP host) can
 use it as a sub-agent. Solves the headless print-mode bug in agy 1.0.x
-(verified broken through 1.0.1; -p still does not print the answer on 1.0.5)
+(verified broken through 1.0.1; -p still does not print the answer on 1.0.6)
 by running `agy -p` and reading the response from agy's own transcript files
 instead of relying on stdout. State-file layout and transcript schema
-re-verified on agy 1.0.5.
+re-verified on agy 1.0.6.
 
 Auth: piggybacks on whatever credential store `agy` itself uses on the host
 OS (Windows Credential Manager, macOS Keychain, libsecret on Linux). User
@@ -22,10 +22,11 @@ to wait on an interactive/backend step it never gets headless). So the bridge
 does NOT expose a model parameter — it would hang on any real switch. Change
 the model via agy's settings.json instead.
 
-Compat (re-verified on agy 1.0.5): state-file paths, last_conversations.json,
-and the transcript schema are unchanged, and -p still writes the JSONL
-transcript this bridge reads. agy now ALSO dual-writes every conversation to a
-SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db; the 1.0.4
+Compat (re-verified on agy 1.0.6): state-file paths, last_conversations.json,
+and the transcript schema are unchanged, and a normally-completing -p run still
+writes the JSONL transcript this bridge reads. agy now ALSO dual-writes every
+conversation to a SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db;
+the 1.0.4
 changelog says SQLite "will be the CLI's conversation format", so once JSONL
 stops being written the bridge breaks and _read_response will need a SQLite
 reader (it already raises a clear, SQLite-aware error when the transcript is
@@ -35,13 +36,26 @@ the cwd, so last_conversations.json now updates reliably under cache/.
 SECURITY — read this: `agy -p` runs the model as an autonomous agent that
 auto-executes its tools (read/write files, run shell commands, reach the
 network) with NO approval gate and NO opt-out. Re-verified empirically on
-agy 1.0.5 / Windows that print mode runs out-of-workspace writes even WITHOUT
---dangerously-skip-permissions (that flag is a no-op for -p), and that
---sandbox does not constrain filesystem egress there. agy 1.0.5 integrated a
-permission system (its logs show toolPermission=request-review), but it still
-does NOT gate print-mode tool execution — -p created a file outside the
-workspace with no prompt. So `workspace` is only a starting context, NOT a
-security boundary:
+agy 1.0.6 / Windows that print mode runs out-of-workspace writes even WITHOUT
+--dangerously-skip-permissions (that flag is a no-op for -p). agy 1.0.5
+integrated a permission system (its logs show toolPermission=request-review),
+but it still does NOT gate print-mode tool execution — -p created a file
+outside the workspace with no prompt.
+
+--sandbox is NOT a usable safety knob for this bridge. agy 1.0.6 fixed
+--sandbox flag propagation into -p (its 1.0.6 changelog calls this "sandbox
+isolation correctly enforced"), and verified here it now DOES block terminal/
+shell command execution in print mode. But that "isolation" is partial and
+misleadingly named: under --sandbox the model still wrote a file OUTSIDE its
+workspace via the write_to_file tool, and its own permission dump showed
+command(*)/execute_url(*)/read_url(*) all "allowed" — so --sandbox does NOT
+constrain filesystem writes or network egress, only the terminal. Worse for
+us, a --sandbox run that hits a blocked terminal command writes NO JSONL
+transcript (only the SQLite .db), so the bridge would fail to read a response.
+For both reasons the bridge deliberately does NOT pass --sandbox; there is
+still no agy flag that makes print mode safe.
+
+So `workspace` is only a starting context, NOT a security boundary:
 every call effectively runs arbitrary code with your privileges. Only invoke
 this bridge with trusted prompts on trusted content (untrusted input here is
 the classic prompt-injection "lethal trifecta"). For real isolation, run the
@@ -79,7 +93,7 @@ _AGY_LOCK = threading.Lock()
 # Latest agy version the bridge's state-file assumptions were verified against.
 # Newer agy releases may change paths/schemas (the SQLite migration is the known
 # risk), so we warn at startup if the installed agy is newer than this.
-VERIFIED_AGY_VERSION = (1, 0, 5)
+VERIFIED_AGY_VERSION = (1, 0, 6)
 
 # Poll window for the transcript/conversation-id to appear after agy exits.
 # agy has already returned 0 by the time we read, so the common case resolves
@@ -301,9 +315,11 @@ def _resolve_and_read(pinned_conv: Optional[str], workspace: str, start: float) 
 def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -> str:
     # Note: agy's `-p` mode auto-executes all tools/commands with no approval
     # gate, so we deliberately do NOT pass --dangerously-skip-permissions (it is
-    # a no-op for -p) or --sandbox (verified not to constrain FS/network on
-    # Windows). There is no agy flag that makes print mode safe; see the module
-    # docstring's SECURITY note.
+    # a no-op for -p) or --sandbox. On 1.0.6 --sandbox blocks only terminal/shell
+    # commands, not write_to_file/FS or network egress, so it is no real boundary;
+    # and a sandbox-blocked terminal run writes no JSONL transcript for us to read.
+    # There is no agy flag that makes print mode safe; see the module docstring's
+    # SECURITY note.
     args = ["agy", "--print-timeout", f"{timeout_s}s"]
 
     pinned_conv: Optional[str] = None

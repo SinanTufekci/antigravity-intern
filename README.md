@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
-[![agy 1.0.5 verified](https://img.shields.io/badge/agy-1.0.5%20verified-2ea44f)](https://antigravity.google/)
+[![agy 1.0.6 verified](https://img.shields.io/badge/agy-1.0.6%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 
 </div>
@@ -23,8 +23,9 @@ your terminal.
 
 > [!WARNING]
 > **This runs unsandboxed code with your privileges.** `agy -p` auto-executes its tools
-> (read/write files, run shell commands, reach the network) with **no approval gate and no
-> opt-out** — we verified there is no agy flag that changes this. The `workspace` argument is a
+> (read/write files, run shell commands, reach the network) with **no usable approval gate**.
+> `--sandbox` (fixed for `-p` in agy 1.0.6) blocks only *shell commands* — file writes and
+> network egress stay wide open — so it's no real boundary. The `workspace` argument is a
 > *starting context*, **not** a security boundary. Only use it with **trusted prompts on trusted
 > content**; for real isolation, run the bridge inside a container or VM. **[Full details →](#security)**
 
@@ -138,7 +139,7 @@ for context-aware answers — agy gives the model access to files under that roo
 `agy -p` runs the model as an **autonomous agent that auto-executes its own tools** — reading and
 writing files, running shell commands, and reaching the network — with **no approval gate and no
 opt-out**. This isn't a choice the bridge makes; it's how agy's print mode works. Re-verified
-empirically on **agy 1.0.5 / Windows**:
+empirically on **agy 1.0.6 / Windows**:
 
 - Print mode runs out-of-workspace file writes and live network fetches **even without**
   `--dangerously-skip-permissions` — that flag is a **no-op** for `-p`. There is **no** agy flag
@@ -146,8 +147,13 @@ empirically on **agy 1.0.5 / Windows**:
 - agy 1.0.5 integrated a permission system (its logs show `toolPermission=request-review`), but it
   **still does not gate print-mode execution** — a fresh `-p` run created a file outside the
   workspace with no prompt.
-- `--sandbox` does **not** constrain filesystem writes or network egress on Windows, so it buys no
-  real protection here.
+- `--sandbox` is **not** a usable boundary. agy 1.0.6 fixed its propagation into `-p` (the 1.0.6
+  changelog calls this "sandbox isolation correctly enforced") and it now **does** block terminal/
+  shell command execution — but verified here that it leaves the `write_to_file` tool and network
+  **wide open**: under `--sandbox` the model still wrote a file *outside* its workspace, and its own
+  permission dump showed `command(*)` / `execute_url(*)` / `read_url(*)` all `allowed`. On top of
+  that, a `--sandbox` run whose blocked terminal command halts it writes **no JSONL transcript**, so
+  the bridge couldn't read a response — so the bridge deliberately never passes `--sandbox`.
 
 **What that means for you:**
 
@@ -175,9 +181,9 @@ apply, and you're responsible for staying within them.
 <summary><b>Will it break when agy updates?</b></summary>
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
-schemas and break it silently. Re-verified working on **1.0.5** (transcript schema and `-p` JSONL
+schemas and break it silently. Re-verified working on **1.0.6** (transcript schema and `-p` JSONL
 output unchanged; live smoke test passes). The known future risk is agy's **SQLite (`.db`)
-conversation format** (added in 1.0.4, slated to become the default): agy 1.0.5 already
+conversation format** (added in 1.0.4, slated to become the default): agy 1.0.6 already
 **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db` alongside
 the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
 known-good `agy` version if you depend on this.
@@ -215,22 +221,23 @@ requests queue rather than race — plan latency accordingly under load.
 
 ## Status & caveats
 
-- ✅ **Verified on agy 1.0.5** — base dir, `last_conversations.json`, the
+- ✅ **Verified on agy 1.0.6** — base dir, `last_conversations.json`, the
   `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
   flags are all unchanged; a live smoke test passes both round-trips. The 1.0.5 `-p` metadata fix
   also means agy no longer litters the workspace dir.
-- ⏳ **SQLite migration is the real risk** — agy 1.0.5 already dual-writes a `.db` per conversation;
+- ⏳ **SQLite migration is the real risk** — agy 1.0.6 already dual-writes a `.db` per conversation;
   see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
   ever disappears.
-- 🐛 **Stdout bug** — `-p` still doesn't print the answer on 1.0.5. If a future release fixes
+- 🐛 **Stdout bug** — `-p` still doesn't print the answer on 1.0.6. If a future release fixes
   stdout, this workaround becomes redundant but harmless.
-- 🔒 **No real sandbox** — agy 1.0.5's new permission system still doesn't gate `-p`; see
-  [Security](#security).
+- 🔒 **No real sandbox** — agy 1.0.6's `--sandbox` now blocks shell commands in `-p` but still
+  leaves file writes and network egress open (and breaks transcript reading), so it's no boundary;
+  see [Security](#security).
 
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.5**)
+- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.6**)
 - An active Antigravity / AI Pro session
 
 The bridge uses only cross-platform Python (`Path.home()`, `subprocess`) and reads paths under

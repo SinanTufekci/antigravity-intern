@@ -224,7 +224,7 @@ def test_compat_warning_warns_for_newer_version():
     msg = server._compat_warning((1, 1, 0))
     assert msg is not None
     assert "1.1.0" in msg  # the detected version
-    assert "1.0.5" in msg  # the verified baseline it's compared to
+    assert "1.0.6" in msg  # the verified baseline it's compared to
 
 
 def test_compat_warning_none_when_version_unknown():
@@ -266,7 +266,7 @@ def test_startup_checks_warns_on_newer_agy(monkeypatch, caplog):
 
 
 def test_startup_checks_silent_on_verified_agy(monkeypatch, caplog):
-    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.6")
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert caplog.text == ""

@@ -17,6 +17,11 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# Flat layout: the distributable is the single `server` module. Without this,
+# setuptools auto-discovery aborts because the repo root also holds test_*.py.
+[tool.setuptools]
+py-modules = ["server"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
