@@ -1,6 +1,6 @@
 [project]
 name = "agy-mcp-server"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server bridging Antigravity CLI (agy) so Claude Code can use it as a sub-agent"
 requires-python = ">=3.10"
 dependencies = [
