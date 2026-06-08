@@ -324,6 +324,20 @@ def _newest_scratch_image_after(start: float) -> Optional[str]:
     return best
 
 
+def _wrap_image_prompt(prompt: str, target: str) -> str:
+    """Wrap a user image prompt with an explicit save path + path-only reply.
+
+    agy honours an explicit absolute path; without one it falls back to its own
+    scratch dir. Asking it to reply with only the path gives a reliable hint for
+    locating the file.
+    """
+    return (
+        f"{prompt}. Save the generated image to this exact absolute path: "
+        f"{target} . After saving, reply with ONLY the absolute file path where "
+        f"you actually saved the image, nothing else."
+    )
+
+
 def _collect_status() -> list[tuple[str, bool, str]]:
     """Gather offline setup diagnostics as (label, ok, detail) rows.
 

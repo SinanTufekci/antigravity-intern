@@ -614,3 +614,15 @@ def test_newest_scratch_image_after_ignores_old(scratch_dir):
 def test_newest_scratch_image_after_missing_dir_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "SCRATCH_DIR", tmp_path / "nope")
     assert server._newest_scratch_image_after(time.time()) is None
+
+
+# --------------------------------------------------------------------------
+# _wrap_image_prompt
+# --------------------------------------------------------------------------
+
+
+def test_wrap_image_prompt_embeds_target_and_prompt():
+    w = server._wrap_image_prompt("a red cat", "C:\\out\\img.png")
+    assert "a red cat" in w
+    assert "C:\\out\\img.png" in w
+    assert "absolute file path" in w
