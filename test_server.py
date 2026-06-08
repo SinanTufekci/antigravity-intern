@@ -551,3 +551,24 @@ def test_canonical_ext_maps_known_formats():
 def test_with_ext_replaces_extension():
     assert server._with_ext("C:\\a\\b.png", ".jpg") == "C:\\a\\b.jpg"
     assert server._with_ext("/a/b/c.jpeg", ".jpg") == "/a/b/c.jpg"
+
+
+# --------------------------------------------------------------------------
+# _resolve_output_path
+# --------------------------------------------------------------------------
+
+
+def test_resolve_output_path_default_name(tmp_path):
+    out = server._resolve_output_path(None, str(tmp_path))
+    assert out.startswith(os.path.join(str(tmp_path), "agy-image-"))
+    assert out.endswith(".png")
+
+
+def test_resolve_output_path_relative_joined_to_workspace(tmp_path):
+    out = server._resolve_output_path("sub/pic.png", str(tmp_path))
+    assert out == os.path.abspath(os.path.join(str(tmp_path), "sub/pic.png"))
+
+
+def test_resolve_output_path_absolute_kept(tmp_path):
+    p = str(tmp_path / "abs.png")
+    assert server._resolve_output_path(p, "C:\\other") == os.path.abspath(p)

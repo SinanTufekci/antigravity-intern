@@ -286,6 +286,21 @@ def _with_ext(path: str, ext: str) -> str:
     return os.path.splitext(path)[0] + ext
 
 
+def _resolve_output_path(output_path: Optional[str], workspace: str) -> str:
+    """Resolve the absolute target path for a generated image.
+
+    Omitted -> a timestamped default under `workspace`; relative -> joined to
+    `workspace`; absolute -> used as-is. The extension may still be corrected
+    after generation (agy emits JPEG even under a .png name).
+    """
+    if not output_path:
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        return os.path.join(workspace, f"agy-image-{stamp}Z.png")
+    if os.path.isabs(output_path):
+        return os.path.abspath(output_path)
+    return os.path.abspath(os.path.join(workspace, output_path))
+
+
 def _collect_status() -> list[tuple[str, bool, str]]:
     """Gather offline setup diagnostics as (label, ok, detail) rows.
 
