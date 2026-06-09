@@ -122,9 +122,10 @@ for context-aware answers — agy gives the model access to files under that roo
 
 `agy_image` forces agy to save to an explicit absolute path — without one, agy
 falls back to its own scratch dir (`~/.gemini/antigravity-cli/scratch/`). It then
-corrects the file extension to match the real bytes: agy's image model emits JPEG
-even when the requested name ends in `.png`, so a requested `out.png` may come
-back as `out.jpg`. The returned path always reflects the true format.
+corrects the file extension to match the real bytes: agy's image model picks the
+format itself (JPEG for photo-like images, PNG for flat graphics), so a requested
+`out.png` may come back as `out.jpg`. The returned path always reflects the true
+format.
 
 ## Model & auth
 
@@ -211,7 +212,7 @@ would hang on any real switch.
 **Yes — that's the `agy_image` tool.** agy's print mode generates real images on
 your AI Pro quota; `agy_image` drives it, saves the file to a path you choose (or
 a timestamped default in your workspace), fixes the extension to match the real
-bytes (agy emits JPEG), and returns the path. Verified on **agy 1.0.6 / Windows**.
+bytes (agy picks JPEG or PNG itself), and returns the path. Verified on **agy 1.0.6 / Windows**.
 It's request/response only and runs a normal, unsandboxed agy session (see
 [Security](#security)).
 </details>

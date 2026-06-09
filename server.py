@@ -255,7 +255,8 @@ def _read_response(conv_id: str) -> str:
 
 
 # Canonical extension per detected image format. Drives extension-correction:
-# agy's image model emits JPEG even when the requested filename ends in .png.
+# agy's image model picks the format itself (JPEG for photos, PNG for flat
+# graphics), regardless of the requested filename's extension.
 _IMAGE_EXT = {"JPEG": ".jpg", "PNG": ".png", "GIF": ".gif", "WEBP": ".webp"}
 
 
@@ -292,7 +293,7 @@ def _resolve_output_path(output_path: Optional[str], workspace: str) -> str:
 
     Omitted -> a timestamped default under `workspace`; relative -> joined to
     `workspace`; absolute -> used as-is. The extension may still be corrected
-    after generation (agy emits JPEG even under a .png name).
+    after generation (agy picks JPEG or PNG itself, regardless of the name).
     """
     if not output_path:
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
@@ -561,10 +562,11 @@ def agy_image(
     and returns the absolute file path plus its real format and byte size. The
     host can then read the path to view the image.
 
-    agy emits JPEG even when asked for a .png name, so the returned path's
-    extension is corrected to match the actual bytes (a requested out.png may
-    come back as out.jpg). Runs a normal, unsandboxed agy session — same
-    privileges/caveats as the other tools (see the module SECURITY note).
+    agy picks the image format itself (JPEG for photo-like images, PNG for flat
+    graphics), so the returned path's extension is corrected to match the actual
+    bytes (a requested out.png may come back as out.jpg). Runs a normal,
+    unsandboxed agy session — same privileges/caveats as the other tools (see the
+    module SECURITY note).
 
     Args:
         prompt: Description of the image to generate.
