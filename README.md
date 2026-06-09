@@ -69,7 +69,7 @@ tool-calling steps. `agy_continue` pins the workspace's **exact** conversation i
 git clone https://github.com/SinanTufekci/Claude-Code-Antigravity-CLI-MCP-Server.git
 cd Claude-Code-Antigravity-CLI-MCP-Server
 pip install fastmcp
-python test_smoke.py        # 2 real round-trips through agy — should print two PASS lines
+python test_smoke.py        # 3 real round-trips (ask, continue, image) — should print three PASS lines
 ```
 
 > [!NOTE]
@@ -242,8 +242,8 @@ requests queue rather than race — plan latency accordingly under load.
 
 - ✅ **Verified on agy 1.0.6** — base dir, `last_conversations.json`, the
   `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
-  flags are all unchanged; a live smoke test passes both round-trips. The 1.0.5 `-p` metadata fix
-  also means agy no longer litters the workspace dir.
+  flags are all unchanged; a live smoke test passes all three round-trips (text ask/continue plus
+  image generation). The 1.0.5 `-p` metadata fix also means agy no longer litters the workspace dir.
 - ⏳ **SQLite migration is the real risk** — agy 1.0.6 already dual-writes a `.db` per conversation;
   see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
   ever disappears.
