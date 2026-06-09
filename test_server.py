@@ -628,6 +628,11 @@ def test_wrap_image_prompt_embeds_target_and_prompt():
     assert "absolute file path" in w
 
 
+def test_wrap_image_prompt_avoids_double_period():
+    w = server._wrap_image_prompt("a red cat.", "C:\\out\\img.png")
+    assert w.startswith("a red cat. Save")  # no ".." when prompt already ends in '.'
+
+
 # --------------------------------------------------------------------------
 # _finalize_image
 # --------------------------------------------------------------------------
@@ -676,7 +681,9 @@ def test_finalize_image_uses_agy_text_when_target_missing(tmp_path, scratch_dir)
     target = str(tmp_path / "requested.png")  # never created
     final, fmt, size = server._finalize_image(target, agy_path, time.time())
     assert fmt == "JPEG"
+    assert final == str(tmp_path / "requested.jpg")  # landed at target's base name
     assert os.path.isfile(final)
+    assert not os.path.exists(tmp_path / "actual.jpg")  # moved, not copied
 
 
 # --------------------------------------------------------------------------

@@ -304,7 +304,8 @@ def _resolve_output_path(output_path: Optional[str], workspace: str) -> str:
 
 
 def _newest_scratch_image_after(start: float) -> Optional[str]:
-    """Newest recognized image file in agy's scratch dir created at/after `start`.
+    """Newest recognized image in agy's scratch dir, modified at/after `start`
+    (with a ~2 s buffer to absorb filesystem timestamp lag).
 
     agy falls back to ~/.gemini/antigravity-cli/scratch/ when not given an
     explicit absolute save path. Returns an absolute path string, or None.
