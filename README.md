@@ -102,7 +102,7 @@ using the absolute path to `server.py`:
 </td></tr>
 </table>
 
-Restart Claude Code. Three tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, and **`mcp__agy__agy_status`**.
+Restart Claude Code. Four tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_status`**, and **`mcp__agy__agy_image`**.
 
 > *"Use agy_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -115,9 +115,16 @@ Restart Claude Code. Three tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__a
 | `agy_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
 | `agy_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
 | `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
+| `agy_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
 
 `workspace` defaults to the MCP server's current working directory. Point it at a real project dir
 for context-aware answers — agy gives the model access to files under that root.
+
+`agy_image` forces agy to save to an explicit absolute path — without one, agy
+falls back to its own scratch dir (`~/.gemini/antigravity-cli/scratch/`). It then
+corrects the file extension to match the real bytes: agy's image model emits JPEG
+even when the requested name ends in `.png`, so a requested `out.png` may come
+back as `out.jpg`. The returned path always reflects the true format.
 
 ## Model & auth
 
@@ -201,23 +208,12 @@ would hang on any real switch.
 <details>
 <summary><b>Can it generate images?</b></summary>
 
-**Yes** — agy's print mode can generate real images on your AI Pro quota, and the bridge surfaces
-them **today with no code changes**, as long as your prompt tells agy to report the saved path.
-Verified on **agy 1.0.6 / Windows**: an `agy_ask` prompt of *"generate an image of … and reply with
-ONLY the absolute file path"* produced a photorealistic ~360–480 KB image and returned its path as
-plain text. Two gotchas to know:
-
-- **Give it an explicit absolute path.** With a full path like `C:\…\out.png`, agy saves the image
-  exactly there. With a vague destination (e.g. *"the current directory"*) it ignores the
-  `workspace`/cwd and falls back to its own scratch dir, `~/.gemini/antigravity-cli/scratch/` — so
-  spell out the full path you want. Verified both ways.
-- **The extension may not match the real bytes.** Files agy named `*.png` were actually **JPEG**
-  (`FF D8 FF E0`/JFIF) in two runs. If the format matters, detect it from the bytes rather than
-  trusting the name.
-
-It's request/response only and *prompt-dependent* (agy has to choose to report the path), so treat it
-as a handy trick rather than a hardened feature. A dedicated tool that watches the scratch dir and
-returns the artifact would make it reliable — **not built yet**.
+**Yes — that's the `agy_image` tool.** agy's print mode generates real images on
+your AI Pro quota; `agy_image` drives it, saves the file to a path you choose (or
+a timestamped default in your workspace), fixes the extension to match the real
+bytes (agy emits JPEG), and returns the path. Verified on **agy 1.0.6 / Windows**.
+It's request/response only and runs a normal, unsandboxed agy session (see
+[Security](#security)).
 </details>
 
 <details>
