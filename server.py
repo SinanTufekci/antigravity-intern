@@ -85,8 +85,8 @@ AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
 BRAIN_DIR = AGY_DATA / "brain"
 CONVERSATIONS_DIR = AGY_DATA / "conversations"  # agy 1.0.4+ SQLite store
-SCRATCH_DIR = AGY_DATA / "scratch"  # agy saves generated images here when not
-                                    # given an explicit absolute save path
+# agy saves generated images here when not given an explicit absolute save path
+SCRATCH_DIR = AGY_DATA / "scratch"
 
 # Serializes agy invocations within this process. Concurrent runs would race
 # on last_conversations.json (agy rewrites it on every call), so a second
@@ -332,15 +332,18 @@ def _wrap_image_prompt(prompt: str, target: str) -> str:
     scratch dir. Asking it to reply with only the path gives a reliable hint for
     locating the file.
     """
+    base = prompt.rstrip()
+    sep = "" if base.endswith(".") else "."
     return (
-        f"{prompt}. Save the generated image to this exact absolute path: "
+        f"{base}{sep} Save the generated image to this exact absolute path: "
         f"{target} . After saving, reply with ONLY the absolute file path where "
         f"you actually saved the image, nothing else."
     )
 
 
-def _finalize_image(target: str, agy_text: Optional[str], start: float):
-    """Locate the generated image, move it to `target`, fix its extension.
+def _finalize_image(target: str, agy_text: Optional[str], start: float) -> tuple[str, str, int]:
+    """Locate the generated image, move it to `target` (with its extension
+    corrected to the real magic-byte format), and return path + format + size.
 
     Candidate order: the resolved `target`, then an absolute path agy reported in
     `agy_text`, then the newest image in the scratch dir created at/after `start`.
@@ -351,8 +354,9 @@ def _finalize_image(target: str, agy_text: Optional[str], start: float):
     file is found, or if the located file is not a recognized image.
     """
     candidates = [target]
-    if agy_text:
-        candidates.append(agy_text.strip().strip('"'))
+    if agy_text and agy_text.strip():
+        # agy may add prose after the path; take the first non-empty line.
+        candidates.append(agy_text.strip().splitlines()[0].strip().strip('"'))
     scratch = _newest_scratch_image_after(start)
     if scratch:
         candidates.append(scratch)

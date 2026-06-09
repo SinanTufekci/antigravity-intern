@@ -670,6 +670,15 @@ def test_finalize_image_non_image_raises(tmp_path, scratch_dir):
         server._finalize_image(target, None, time.time())
 
 
+def test_finalize_image_uses_agy_text_when_target_missing(tmp_path, scratch_dir):
+    (tmp_path / "actual.jpg").write_bytes(_JPEG)
+    agy_path = str(tmp_path / "actual.jpg")
+    target = str(tmp_path / "requested.png")  # never created
+    final, fmt, size = server._finalize_image(target, agy_path, time.time())
+    assert fmt == "JPEG"
+    assert os.path.isfile(final)
+
+
 # --------------------------------------------------------------------------
 # agy_image (orchestration; _run_agy mocked)
 # --------------------------------------------------------------------------
@@ -709,4 +718,15 @@ def test_agy_image_raises_when_nothing_produced(tmp_path, scratch_dir, monkeypat
 
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="no image file found"):
+        server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
+
+
+def test_agy_image_error_mentions_agy_failure(tmp_path, scratch_dir, monkeypatch):
+    target = str(tmp_path / "art.png")
+
+    def boom(prompt, ws, continue_conv, timeout_s):
+        raise RuntimeError("agy exited 1")
+
+    monkeypatch.setattr(server, "_run_agy", boom)
+    with pytest.raises(RuntimeError, match="agy also failed"):
         server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
