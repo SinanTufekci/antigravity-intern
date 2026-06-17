@@ -157,7 +157,7 @@ Restart Claude Code. Eight tools appear: **`antigravity_ask`**, **`antigravity_c
 | `antigravity_image_watch(prompt, output_path?, workspace?, timeout_s?=240)` | 🧪 **Experimental.** Like `antigravity_image`, but streams progress and **shows the generated image** in the Antigravity Intern window. |
 | `antigravity_swarm(prompts, workspaces?, max_concurrency?=4, timeout_s?=180, watch?=false)` | Run **several prompts in parallel** as independent agy workers; returns every answer in one block (see [Swarm](#swarm)). |
 | `antigravity_image_swarm(prompts, output_paths?, workspaces?, max_concurrency?=4, timeout_s?=240, watch?=false)` | Generate **several images in parallel** (one worker per prompt). |
-| `antigravity_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
+| `antigravity_status()` | Setup diagnostics: **the bridge's own version + whether a newer release is available**, plus agy version/compat, state dirs, and newest-transcript readability. Spends no quota. |
 
 `workspace` defaults to the MCP server's current working directory. Point it at a real project dir
 for context-aware answers — agy gives the model access to files under that root.
@@ -413,12 +413,20 @@ startup the server warns if your installed agy is newer than the version it was 
 **Staying up to date.** Updates are opt-in by design: plain `uvx antigravity-intern` pins to the
 version it first cached, and a `git clone` never auto-updates — so the bridge only ever runs code
 you chose to install (it runs unsandboxed, so this is deliberate, not laziness). Nothing updates a
-*running* server either; new versions take effect on the next Claude Code restart. To surface them,
-on startup the server polls the GitHub tags API once and logs a one-line warning to stderr when a
-newer release tag exists than the running code (`__version__` in `server.py`); upgrade with
-`uvx antigravity-intern@latest` (or `git pull`) and restart. Opt into hands-off auto-updates by
-putting `antigravity-intern@latest` in the config. The check is best-effort — silent when offline or
-rate-limited, never blocks startup. Control it with:
+*running* server either; new versions take effect on the next Claude Code restart. You find out about
+a release two ways, both best-effort GitHub tag checks against the running code (`__version__` in
+`server.py`):
+
+- **In chat — [`antigravity_status`](#tools)** leads with a `bridge version` row, e.g.
+  `v0.10.2 (latest)` or `v0.10.2 -> v0.10.3 available; upgrade: uvx antigravity-intern@latest`. This
+  is the notice you actually see in the MCP client's UI (an available update stays `[ok]` — it's
+  informational, not a fault).
+- **At startup — stderr**, where the server logs the same one-line warning. This lands in the host's
+  MCP logs only (e.g. via `/mcp` in Claude Code), not the chat.
+
+Upgrade with `uvx antigravity-intern@latest` (or `git pull`) and restart, or opt into hands-off
+auto-updates by putting `antigravity-intern@latest` in the config. Both checks are silent when
+offline or rate-limited and never block startup. Control them with:
 
 | Env var | Effect |
 |---|---|
