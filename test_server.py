@@ -422,7 +422,7 @@ def fake_agy(monkeypatch, brain_dir, last_conv_file):
     return cap
 
 
-def test_run_agy_continue_with_pinned_id(fake_agy, brain_dir, last_conv_file):
+def test_run_antigravity_continue_with_pinned_id(fake_agy, brain_dir, last_conv_file):
     last_conv_file.write_text(json.dumps({"C:\\ws": "c1"}), encoding="utf-8")
     _write_transcript(brain_dir, "c1", [_entry("PLANNER_RESPONSE", "ans")])
     out = server._run_agy("hi", "C:\\ws", continue_conv=True, timeout_s=10)
@@ -431,7 +431,7 @@ def test_run_agy_continue_with_pinned_id(fake_agy, brain_dir, last_conv_file):
     assert "c1" in fake_agy["args"]
 
 
-def test_run_agy_continue_without_id_uses_dash_c(fake_agy, brain_dir, last_conv_file):
+def test_run_antigravity_continue_without_id_uses_dash_c(fake_agy, brain_dir, last_conv_file):
     last_conv_file.write_text(json.dumps({}), encoding="utf-8")
     _write_transcript(brain_dir, "newest", [_entry("PLANNER_RESPONSE", "ans")])
     os.utime(brain_dir / "newest", (time.time() + 5, time.time() + 5))
@@ -441,7 +441,7 @@ def test_run_agy_continue_without_id_uses_dash_c(fake_agy, brain_dir, last_conv_
     assert "--conversation" not in fake_agy["args"]
 
 
-def test_run_agy_ask_has_no_continue_flags(fake_agy, brain_dir, last_conv_file):
+def test_run_antigravity_ask_has_no_continue_flags(fake_agy, brain_dir, last_conv_file):
     last_conv_file.write_text(json.dumps({"C:\\ws": "c1"}), encoding="utf-8")
     _write_transcript(brain_dir, "c1", [_entry("PLANNER_RESPONSE", "ans")])
     server._run_agy("hi", "C:\\ws", continue_conv=False, timeout_s=10)
@@ -947,9 +947,9 @@ def test_collect_status_unreadable_transcript(status_dirs, monkeypatch):
     assert _status_dict(rows)["newest transcript"][0] is False
 
 
-def test_agy_status_formats_report(status_dirs, monkeypatch):
+def test_antigravity_status_formats_report(status_dirs, monkeypatch):
     monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.5")
-    out = server.agy_status()
+    out = server.antigravity_status()
     assert out.startswith("agy bridge status")
     assert "[ok]" in out
     assert "Overall:" in out
@@ -1145,11 +1145,11 @@ def test_finalize_image_uses_agy_text_when_target_missing(tmp_path, scratch_dir)
 
 
 # --------------------------------------------------------------------------
-# agy_image (orchestration; _run_agy mocked)
+# antigravity_image (orchestration; _run_agy mocked)
 # --------------------------------------------------------------------------
 
 
-def test_agy_image_happy_path(tmp_path, scratch_dir, monkeypatch):
+def test_antigravity_image_happy_path(tmp_path, scratch_dir, monkeypatch):
     target = str(tmp_path / "art.png")
 
     def fake_run(prompt, ws, continue_conv, timeout_s):
@@ -1157,13 +1157,13 @@ def test_agy_image_happy_path(tmp_path, scratch_dir, monkeypatch):
         return target
 
     monkeypatch.setattr(server, "_run_agy", fake_run)
-    out = server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
+    out = server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
     assert str(tmp_path / "art.jpg") in out
     assert "format=JPEG" in out
     assert os.path.isfile(tmp_path / "art.jpg")
 
 
-def test_agy_image_recovers_when_run_agy_raises(tmp_path, scratch_dir, monkeypatch):
+def test_antigravity_image_recovers_when_run_agy_raises(tmp_path, scratch_dir, monkeypatch):
     (tmp_path / "art.png").write_bytes(_JPEG)  # file already on disk
     target = str(tmp_path / "art.png")
 
@@ -1171,11 +1171,11 @@ def test_agy_image_recovers_when_run_agy_raises(tmp_path, scratch_dir, monkeypat
         raise RuntimeError("transcript read failed")
 
     monkeypatch.setattr(server, "_run_agy", boom)
-    out = server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
+    out = server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
     assert "format=JPEG" in out
 
 
-def test_agy_image_raises_when_nothing_produced(tmp_path, scratch_dir, monkeypatch):
+def test_antigravity_image_raises_when_nothing_produced(tmp_path, scratch_dir, monkeypatch):
     target = str(tmp_path / "art.png")
 
     def boom(prompt, ws, continue_conv, timeout_s):
@@ -1183,10 +1183,10 @@ def test_agy_image_raises_when_nothing_produced(tmp_path, scratch_dir, monkeypat
 
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="no image file found"):
-        server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
+        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
 
 
-def test_agy_image_error_mentions_agy_failure(tmp_path, scratch_dir, monkeypatch):
+def test_antigravity_image_error_mentions_agy_failure(tmp_path, scratch_dir, monkeypatch):
     target = str(tmp_path / "art.png")
 
     def boom(prompt, ws, continue_conv, timeout_s):
@@ -1194,4 +1194,4 @@ def test_agy_image_error_mentions_agy_failure(tmp_path, scratch_dir, monkeypatch
 
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="agy also failed"):
-        server.agy_image("a cat", output_path=target, workspace=str(tmp_path))
+        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))

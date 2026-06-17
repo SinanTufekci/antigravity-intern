@@ -54,7 +54,7 @@ body:
       label: What happened
       description: What did you run, what did you expect, what did you get?
       placeholder: |
-        I called `agy_ask("...")` from Claude Code and got ... instead of ...
+        I called `antigravity_ask("...")` from Claude Code and got ... instead of ...
     validations:
       required: true
 

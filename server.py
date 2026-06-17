@@ -86,7 +86,7 @@ from typing import Callable, Optional
 import anyio
 from fastmcp import Context, FastMCP
 
-mcp = FastMCP("agy")
+mcp = FastMCP("antigravity-intern")
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -495,14 +495,14 @@ def _finalize_image(target: str, agy_text: Optional[str], start: float) -> tuple
     src = next((c for c in candidates if c and os.path.isfile(c)), None)
     if src is None:
         raise RuntimeError(
-            f"agy_image: no image file found. Looked at target {target!r} and "
+            f"antigravity_image: no image file found. Looked at target {target!r} and "
             f"scratch dir {SCRATCH_DIR}."
         )
 
     fmt = _detect_image_format(src)
     if fmt is None:
         raise RuntimeError(
-            f"agy_image: {src!r} is not a recognized image. agy may have refused "
+            f"antigravity_image: {src!r} is not a recognized image. agy may have refused "
             "the request or returned text instead of an image."
         )
 
@@ -867,7 +867,7 @@ class _WatchFeed:
 _WATCH_HTML = """<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google" content="notranslate">
-<title>Wingman — watching agy</title>
+<title>Antigravity Intern — watching agy</title>
 <style>
 :root{
  --bg:#0a0c10;--fg:#d6d6d6;--dim:#677;--green:#3fdf7f;--cyan:#5cd6e6;
@@ -974,7 +974,7 @@ main{padding:11px 14px}
 </style></head><body>
 <div class="top">
  <header>
-  <span class="name">Wingman</span><span class="wlabel">— watching agy</span>
+  <span class="name">Antigravity Intern</span><span class="wlabel">— watching agy</span>
   <span class="pill" id="pill">
    <span class="dot" id="dot" style="display:none"></span>
    <span class="spin" id="spin"></span>
@@ -1227,7 +1227,7 @@ def _run_agy_watched(prompt: str, workspace: str, continue_conv: bool, timeout_s
     agy runs headless (console-detached, no leak); alongside it, the bridge serves
     a small localhost page and opens your browser to it, live-streaming agy's steps
     (narration + the real commands it runs) read from the transcript. The return
-    value is identical to agy_ask. The viewer is best-effort and cross-platform
+    value is identical to antigravity_ask. The viewer is best-effort and cross-platform
     (any browser); if it can't open, the run still completes normally.
     """
     args, pinned_conv = _build_agy_args(prompt, workspace, continue_conv, timeout_s)
@@ -1288,9 +1288,9 @@ def _run_agy_image_watched(
 ) -> str:
     """Generate an image with a live watch window that also displays the result.
 
-    EXPERIMENTAL. Runs agy headless, streams its steps to the Wingman window,
+    EXPERIMENTAL. Runs agy headless, streams its steps to the Antigravity Intern window,
     finalises the generated image (extension corrected to the real bytes), shows
-    it in the window, and returns the same string as agy_image. `display_prompt`
+    it in the window, and returns the same string as antigravity_image. `display_prompt`
     is the user's original prompt, shown as the window title (not the wrapped
     save-path instructions that actually go to agy).
     """
@@ -1330,7 +1330,7 @@ def _run_agy_image_watched(
         proc.communicate()
 
         # The transcript read may fail even though the image was written; don't lose
-        # a produced image to a transcript hiccup (mirrors agy_image).
+        # a produced image to a transcript hiccup (mirrors antigravity_image).
         agy_text = None
         agy_error = None
         try:
@@ -1353,7 +1353,7 @@ def _run_agy_image_watched(
 
 
 @mcp.tool()
-def agy_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
+def antigravity_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
     """Ask Antigravity (Gemini 3.5 Flash High via agy CLI) a question in a NEW conversation.
 
     Uses your existing AI Pro authentication (silent-auth via Windows Credential
@@ -1374,7 +1374,7 @@ def agy_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) 
 
 
 @mcp.tool()
-def agy_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
+def antigravity_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
     """Continue the Antigravity conversation rooted at this workspace.
 
     Resumes the exact conversation id recorded for `workspace` (via agy's
@@ -1391,15 +1391,15 @@ def agy_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 
 
 
 @mcp.tool()
-def agy_ask_stream(
+def antigravity_ask_stream(
     prompt: str,
     workspace: Optional[str] = None,
     timeout_s: int = 180,
     ctx: Context = None,
 ) -> str:
-    """EXPERIMENTAL: like agy_ask, but stream agy's progress while it works.
+    """EXPERIMENTAL: like antigravity_ask, but stream agy's progress while it works.
 
-    Starts a NEW conversation and returns the same final text as agy_ask, but as
+    Starts a NEW conversation and returns the same final text as antigravity_ask, but as
     agy works it reports each intermediate step — its planner narration (the same
     text that, pre-fix, leaked into the host terminal) and its tool runs — as MCP
     progress notifications, read live from agy's transcript.
@@ -1407,7 +1407,7 @@ def agy_ask_stream(
     Progress is intentionally coarse: agy flushes its transcript in chunks, so
     expect a few ticks per run with an initial blind window, not token-level
     streaming. Whether you SEE the ticks depends on your MCP client surfacing
-    progress/log notifications; the final return value is identical to agy_ask.
+    progress/log notifications; the final return value is identical to antigravity_ask.
 
     Args:
         prompt: Question or instruction for Antigravity.
@@ -1434,10 +1434,12 @@ def agy_ask_stream(
 
 
 @mcp.tool()
-def agy_ask_watch(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
-    """EXPERIMENTAL: like agy_ask, but open a live "watch" view in your browser.
+def antigravity_ask_watch(
+    prompt: str, workspace: Optional[str] = None, timeout_s: int = 180
+) -> str:
+    """EXPERIMENTAL: like antigravity_ask, but open a live "watch" view in your browser.
 
-    Starts a NEW conversation and returns the same final text as agy_ask. agy
+    Starts a NEW conversation and returns the same final text as antigravity_ask. agy
     itself runs headless (nothing leaks into your terminal); ALONGSIDE it, the
     bridge serves a small page on localhost and opens your browser to it, live-
     streaming agy's steps as it works — its narration and the real commands it runs
@@ -1458,7 +1460,7 @@ def agy_ask_watch(prompt: str, workspace: Optional[str] = None, timeout_s: int =
 
 
 @mcp.tool()
-def agy_image(
+def antigravity_image(
     prompt: str,
     output_path: Optional[str] = None,
     workspace: Optional[str] = None,
@@ -1510,16 +1512,16 @@ def agy_image(
 
 
 @mcp.tool()
-def agy_image_watch(
+def antigravity_image_watch(
     prompt: str,
     output_path: Optional[str] = None,
     workspace: Optional[str] = None,
     timeout_s: int = 240,
 ) -> str:
-    """EXPERIMENTAL: like agy_image, but stream progress and SHOW the image live.
+    """EXPERIMENTAL: like antigravity_image, but stream progress and SHOW the image live.
 
-    Generates an image exactly like agy_image (same save path / format-correction /
-    return value), but opens the Wingman browser window, streams agy's steps as it
+    Generates an image exactly like antigravity_image (same save path / format-correction /
+    return value), but opens the Antigravity Intern browser window, streams agy's steps as it
     works, and displays the finished image inline in that window. Best-effort and
     cross-platform; if the window can't open the image is still generated and
     returned. Same privileges/caveats as the other tools (see the module SECURITY
@@ -1540,7 +1542,7 @@ def agy_image_watch(
 
 
 @mcp.tool()
-def agy_status() -> str:
+def antigravity_status() -> str:
     """Report offline diagnostics for the agy bridge setup (spends no quota).
 
     Checks whether agy is on PATH (and its version/compat), whether agy's state

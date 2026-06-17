@@ -1,4 +1,4 @@
-"""Smoke test: call agy_ask directly (no MCP transport) and verify a response."""
+"""Smoke test: call antigravity_ask directly (no MCP transport) and verify a response."""
 
 import io
 import sys
@@ -10,36 +10,36 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 from server import (  # noqa: E402  (after stdout/stderr rewrap above)
     _detect_image_format,
     _run_agy_streamed,
-    agy_ask,
-    agy_continue,
-    agy_image,
+    antigravity_ask,
+    antigravity_continue,
+    antigravity_image,
 )
 
 
 def main() -> int:
-    print("=== smoke 1: agy_ask new conversation ===")
+    print("=== smoke 1: antigravity_ask new conversation ===")
     t0 = time.time()
-    resp = agy_ask(prompt="Sadece tek bir kelime yaz: 'merhaba'. Başka hiçbir şey yazma.")
+    resp = antigravity_ask(prompt="Sadece tek bir kelime yaz: 'merhaba'. Başka hiçbir şey yazma.")
     print(f"elapsed: {time.time() - t0:.1f}s")
     print(f"response ({len(resp)} chars): {resp!r}")
     assert resp.strip(), "empty response"
     print("PASS")
 
-    print("\n=== smoke 2: agy_continue same conversation ===")
+    print("\n=== smoke 2: antigravity_continue same conversation ===")
     t0 = time.time()
-    resp2 = agy_continue(prompt="Şimdi tek kelime: 'dünya'. Başka bir şey yazma.")
+    resp2 = antigravity_continue(prompt="Şimdi tek kelime: 'dünya'. Başka bir şey yazma.")
     print(f"elapsed: {time.time() - t0:.1f}s")
     print(f"response ({len(resp2)} chars): {resp2!r}")
     assert resp2.strip(), "empty response"
     print("PASS")
 
-    print("\n=== smoke 3: agy_image generates a file ===")
+    print("\n=== smoke 3: antigravity_image generates a file ===")
     import os
     import tempfile
 
     out_path = os.path.join(tempfile.gettempdir(), "agy_smoke_image.png")
     t0 = time.time()
-    result = agy_image(
+    result = antigravity_image(
         prompt="A simple solid blue circle centered on a plain white background.",
         output_path=out_path,
     )
@@ -50,7 +50,7 @@ def main() -> int:
     assert _detect_image_format(final), f"not a recognized image: {final}"
     print("PASS")
 
-    print("\n=== smoke 4: agy_ask_stream emits live progress ===")
+    print("\n=== smoke 4: antigravity_ask_stream emits live progress ===")
     ticks = []
 
     def on_progress(step, message):

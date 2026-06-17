@@ -63,7 +63,7 @@ flowchart LR
 The bridge runs agy, locates the conversation via `cache/last_conversations.json` (falling back to
 the newest `brain/` directory touched since launch), streams the transcript, and returns the final
 `source=MODEL, status=DONE, type=PLANNER_RESPONSE` entry — the answer, minus the intermediate
-tool-calling steps. `agy_continue` pins the workspace's **exact** conversation id via
+tool-calling steps. `antigravity_continue` pins the workspace's **exact** conversation id via
 `--conversation`, so it never resumes the wrong thread.
 
 ## Set up in 60 seconds
@@ -87,7 +87,7 @@ using the absolute path to `server.py`:
 <tr><td>
 
 ```json
-"agy": {
+"antigravity-intern": {
   "command": "python",
   "args": ["C:\\path\\to\\server.py"]
 }
@@ -96,7 +96,7 @@ using the absolute path to `server.py`:
 </td><td>
 
 ```json
-"agy": {
+"antigravity-intern": {
   "command": "python3",
   "args": ["/path/to/server.py"]
 }
@@ -105,9 +105,9 @@ using the absolute path to `server.py`:
 </td></tr>
 </table>
 
-Restart Claude Code. Seven tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_ask_stream`**, **`mcp__agy__agy_ask_watch`**, **`mcp__agy__agy_image`**, **`mcp__agy__agy_image_watch`**, and **`mcp__agy__agy_status`**.
+Restart Claude Code. Seven tools appear: **`mcp__antigravity-intern__antigravity_ask`**, **`mcp__antigravity-intern__antigravity_continue`**, **`mcp__antigravity-intern__antigravity_ask_stream`**, **`mcp__antigravity-intern__antigravity_ask_watch`**, **`mcp__antigravity-intern__antigravity_image`**, **`mcp__antigravity-intern__antigravity_image_watch`**, and **`mcp__antigravity-intern__antigravity_status`**.
 
-> *"Use agy_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
+> *"Use antigravity_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
 > plain string.
 
@@ -115,18 +115,18 @@ Restart Claude Code. Seven tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__a
 
 | Tool | Purpose |
 |---|---|
-| `agy_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
-| `agy_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
-| `agy_ask_stream(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `agy_ask`, but emits agy's intermediate steps as MCP **progress notifications** while it works (coarse — see [FAQ](#faq)). |
-| `agy_ask_watch(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `agy_ask`, but opens the **Wingman** live browser window so you can watch agy work (see [Watch mode](#watch-mode)). |
-| `agy_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
-| `agy_image_watch(prompt, output_path?, workspace?, timeout_s?=240)` | 🧪 **Experimental.** Like `agy_image`, but streams progress and **shows the generated image** in the Wingman window. |
-| `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
+| `antigravity_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
+| `antigravity_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
+| `antigravity_ask_stream(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `antigravity_ask`, but emits agy's intermediate steps as MCP **progress notifications** while it works (coarse — see [FAQ](#faq)). |
+| `antigravity_ask_watch(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `antigravity_ask`, but opens the **Antigravity Intern** live browser window so you can watch agy work (see [Watch mode](#watch-mode)). |
+| `antigravity_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
+| `antigravity_image_watch(prompt, output_path?, workspace?, timeout_s?=240)` | 🧪 **Experimental.** Like `antigravity_image`, but streams progress and **shows the generated image** in the Antigravity Intern window. |
+| `antigravity_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
 
 `workspace` defaults to the MCP server's current working directory. Point it at a real project dir
 for context-aware answers — agy gives the model access to files under that root.
 
-`agy_image` forces agy to save to an explicit absolute path — without one, agy
+`antigravity_image` forces agy to save to an explicit absolute path — without one, agy
 falls back to its own scratch dir (`~/.gemini/antigravity-cli/scratch/`). It then
 corrects the file extension to match the real bytes: agy's image model picks the
 format itself (JPEG for photo-like images, PNG for flat graphics), so a requested
@@ -135,15 +135,15 @@ format.
 
 <a id="watch-mode"></a>
 
-## 👁️ Watch mode — Wingman (experimental)
+## 👁️ Watch mode — Antigravity Intern (experimental)
 
-`agy_ask_watch` / `agy_image_watch` do the same work as `agy_ask` / `agy_image`, but
+`antigravity_ask_watch` / `antigravity_image_watch` do the same work as `antigravity_ask` / `antigravity_image`, but
 let you **watch agy work live in a little terminal-style browser window** called
-**Wingman**. agy still runs headless; alongside it the bridge serves a tiny page on
+**Antigravity Intern**. agy still runs headless; alongside it the bridge serves a tiny page on
 `127.0.0.1` and opens it in a small, chromeless app window that streams agy's steps —
 its planner narration (▸), the **real commands** it runs (`$`), and completions (✓) —
 read live from the transcript, with the final answer rendered as Markdown (and, for
-`agy_image_watch`, the generated image shown inline).
+`antigravity_image_watch`, the generated image shown inline).
 
 - **Cross-platform & best-effort.** Prefers a Chromium browser (`--app` mode) for the
   windowed look; falls back to a normal browser window. If nothing can open, the run
@@ -239,8 +239,8 @@ would hang on any real switch.
 <details>
 <summary><b>Can it generate images?</b></summary>
 
-**Yes — that's the `agy_image` tool.** agy's print mode generates real images on
-your AI Pro quota; `agy_image` drives it, saves the file to a path you choose (or
+**Yes — that's the `antigravity_image` tool.** agy's print mode generates real images on
+your AI Pro quota; `antigravity_image` drives it, saves the file to a path you choose (or
 a timestamped default in your workspace), fixes the extension to match the real
 bytes (agy picks JPEG or PNG itself), and returns the path. Verified on **agy 1.0.9 / Windows**.
 It's request/response only and runs a normal, unsandboxed agy session (see
@@ -257,8 +257,8 @@ amount.
 <details>
 <summary><b>Does it stream responses?</b></summary>
 
-The final answer is request/response — `agy -p` returns it all at once, so `agy_ask`/`agy_continue`
-do too (each call typically takes 10–30 s). But there's an **experimental** `agy_ask_stream` that
+The final answer is request/response — `agy -p` returns it all at once, so `antigravity_ask`/`antigravity_continue`
+do too (each call typically takes 10–30 s). But there's an **experimental** `antigravity_ask_stream` that
 reports agy's *intermediate* steps as MCP **progress notifications** while it works, read live from
 agy's transcript. It's deliberately **coarse**: agy flushes its transcript in chunks (observed on
 1.0.9: it can sit empty for ~15 s, then append several steps at once), so you get a handful of
@@ -267,7 +267,7 @@ progress ticks — agy's planner narration and tool runs — not token-by-token 
 **Visibility (verified):** the notifications really are sent — confirmed against a compliant MCP
 client (FastMCP's in-memory client receives both the `report_progress` ticks *and* the matching log
 notifications). The catch is the *client*: **Claude Code does not currently surface these mid-call**,
-so there you'll only see the final answer — identical to `agy_ask`. A progress-aware MCP client will
+so there you'll only see the final answer — identical to `antigravity_ask`. A progress-aware MCP client will
 show the live ticks. So this is a client-display limitation, not a bug in the bridge.
 </details>
 
@@ -295,10 +295,10 @@ requests queue rather than race — plan latency accordingly under load.
 - 🐛 **Stdout bug persists** — `-p` still doesn't print the answer to stdout on 1.0.9 (the 1.0.9
   "print-mode resumption" changelog fix did **not** change this for fresh `-p`). If a future release
   fixes stdout, this workaround becomes redundant but harmless.
-- 🧪 **Streaming is experimental** — `agy_ask_stream` emits coarse progress notifications (verified
+- 🧪 **Streaming is experimental** — `antigravity_ask_stream` emits coarse progress notifications (verified
   sent via a compliant MCP client), but **Claude Code doesn't surface them mid-call**, so there you
   see only the final answer; see the [FAQ](#faq).
-- 👁️ **Watch mode is experimental** — `agy_ask_watch` / `agy_image_watch` open the **Wingman**
+- 👁️ **Watch mode is experimental** — `antigravity_ask_watch` / `antigravity_image_watch` open the **Antigravity Intern**
   browser window to watch agy work live (coarse steps; image shown inline). Best-effort and
   cross-platform; see [Watch mode](#watch-mode).
 - 🔒 **No real sandbox** — agy's `--sandbox` (since 1.0.6) blocks only shell commands in `-p` but still
