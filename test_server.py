@@ -360,6 +360,58 @@ def test_fetch_latest_release_version_none_when_no_semver_tags(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# _bridge_version_status  (surfaces the update notice in antigravity_status)
+# --------------------------------------------------------------------------
+
+
+def test_bridge_version_status_flags_newer_release(monkeypatch):
+    monkeypatch.delenv("AGY_BRIDGE_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(server, "__version__", "0.10.1")
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: (0, 10, 2))
+    label, ok, detail = server._bridge_version_status()
+    assert label == "bridge version"
+    assert ok is True  # an available update is informational, not a fault
+    assert "0.10.2" in detail and "available" in detail
+    assert "uvx antigravity-intern@latest" in detail
+
+
+def test_bridge_version_status_reports_latest(monkeypatch):
+    monkeypatch.delenv("AGY_BRIDGE_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(server, "__version__", "0.10.1")
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: (0, 10, 1))
+    _, ok, detail = server._bridge_version_status()
+    assert ok is True
+    assert "latest" in detail and "available" not in detail
+
+
+def test_bridge_version_status_unavailable_when_offline(monkeypatch):
+    monkeypatch.delenv("AGY_BRIDGE_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
+    _, ok, detail = server._bridge_version_status()
+    assert ok is True
+    assert "unavailable" in detail
+
+
+def test_bridge_version_status_respects_opt_out(monkeypatch):
+    monkeypatch.setenv("AGY_BRIDGE_NO_UPDATE_CHECK", "1")
+
+    def _boom():
+        raise AssertionError("update check must not run when disabled")
+
+    monkeypatch.setattr(server, "_fetch_latest_release_version", _boom)
+    _, ok, detail = server._bridge_version_status()
+    assert ok is True
+    assert "disabled" in detail
+
+
+def test_collect_status_first_row_is_bridge_version(monkeypatch):
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
+    monkeypatch.setattr(server, "_get_agy_version", lambda: None)  # skip the agy subprocess
+    rows = server._collect_status()
+    assert rows[0][0] == "bridge version"
+
+
+# --------------------------------------------------------------------------
 # _run_with_progress  (threaded agy run + best-effort MCP progress notifications)
 # --------------------------------------------------------------------------
 

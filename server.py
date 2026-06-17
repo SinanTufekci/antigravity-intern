@@ -94,7 +94,7 @@ mcp = FastMCP("antigravity-intern")
 # installed package metadata, which goes stale on editable installs). Keep in
 # sync with pyproject.toml's version. Compared at startup against the latest
 # tag on GitHub so a long-lived clone learns when to `git pull`.
-__version__ = "0.10.1"
+__version__ = "0.10.2"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -573,12 +573,40 @@ def _finalize_image(target: str, agy_text: Optional[str], start: float) -> tuple
     return final_path, fmt, os.path.getsize(final_path)
 
 
-def _collect_status() -> list[tuple[str, bool, str]]:
-    """Gather offline setup diagnostics as (label, ok, detail) rows.
+def _bridge_version_status() -> tuple[str, bool, str]:
+    """Status row for the bridge's own version and whether a newer release exists.
 
-    Spends no quota: only runs `agy --version` and inspects local state files.
+    Always reports ok=True — an available update is informational, not a fault, so
+    it must not flip the overall status to PROBLEMS FOUND. Honors
+    AGY_BRIDGE_NO_UPDATE_CHECK and stays ok (just uninformative) when GitHub is
+    unreachable. This is what surfaces the update notice in an MCP client's chat
+    (the startup stderr warning only lands in the host's logs).
     """
-    rows: list[tuple[str, bool, str]] = []
+    label = "bridge version"
+    if _env_truthy("AGY_BRIDGE_NO_UPDATE_CHECK"):
+        return (label, True, f"v{__version__} (update check disabled)")
+    latest = _fetch_latest_release_version()
+    if latest is None:
+        return (label, True, f"v{__version__} (update check unavailable — offline?)")
+    current = _parse_agy_version(__version__)
+    if current is not None and latest > current:
+        newest = ".".join(map(str, latest))
+        return (
+            label,
+            True,
+            f"v{__version__} -> v{newest} available; upgrade: uvx antigravity-intern@latest",
+        )
+    return (label, True, f"v{__version__} (latest)")
+
+
+def _collect_status() -> list[tuple[str, bool, str]]:
+    """Gather setup diagnostics as (label, ok, detail) rows.
+
+    Spends no AI Pro quota: runs `agy --version`, inspects local state files, and
+    (unless AGY_BRIDGE_NO_UPDATE_CHECK is set) makes one best-effort GitHub call to
+    report whether a newer bridge release exists.
+    """
+    rows: list[tuple[str, bool, str]] = [_bridge_version_status()]
 
     version = _parse_agy_version(_get_agy_version() or "")
     if version is None:
@@ -1671,12 +1699,15 @@ def antigravity_image_swarm(
     }
 )
 def antigravity_status() -> str:
-    """Report offline diagnostics for the agy bridge setup (spends no quota).
+    """Report diagnostics for the agy bridge setup (spends no AI Pro quota).
 
-    Checks whether agy is on PATH (and its version/compat), whether agy's state
+    Reports the bridge's own version and whether a newer release is available
+    (best-effort GitHub check; honors AGY_BRIDGE_NO_UPDATE_CHECK), then checks
+    whether agy is on PATH (and its version/compat), whether agy's state
     directories exist, whether the newest conversation transcript is readable,
-    and whether the SQLite conversation store is present. Use this to debug
-    empty or failed responses before spending quota.
+    and whether the SQLite conversation store is present. Use this to debug empty
+    or failed responses — or to see if the bridge itself is out of date — before
+    spending quota.
     """
     rows = _collect_status()
     width = max(len(label) for label, _, _ in rows)

@@ -10,6 +10,17 @@ summary.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-06-18
+
+### Added
+
+- `antigravity_status` now reports the bridge's own version and whether a newer
+  release is available (e.g. `v0.10.1 -> v0.10.2 available; upgrade: uvx
+  antigravity-intern@latest`). This surfaces the update notice **in the MCP
+  client's chat** — the startup stderr warning only reaches the host's logs.
+  Best-effort GitHub check; honors `AGY_BRIDGE_NO_UPDATE_CHECK` and never flips
+  the overall status to PROBLEMS FOUND (an available update is informational).
+
 ## [0.10.1] - 2026-06-18
 
 ### Changed
@@ -72,7 +83,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.8.0...v0.9.0
