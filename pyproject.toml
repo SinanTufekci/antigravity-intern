@@ -1,6 +1,6 @@
 [project]
 name = "antigravity-intern"
-version = "0.10.0"
+version = "0.10.1"
 description = "MCP server bridging Antigravity CLI (agy) so Claude Code can use it as a sub-agent"
 readme = "README.md"
 requires-python = ">=3.10"

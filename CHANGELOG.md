@@ -10,14 +10,26 @@ summary.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-06-18
+
+### Changed
+
+- Docs: reworked install guidance now that the package is live on PyPI.
+  `uvx antigravity-intern` is the recommended install, with **opt-in** updates —
+  uvx caches and does not auto-upgrade, so the bridge only runs a release you
+  chose to install (it runs unsandboxed code, so this is deliberate). Upgrade
+  with `uvx antigravity-intern@latest`; `@latest` in the config opts into
+  hands-off auto-updates. Corrected an earlier inaccurate "latest on every
+  launch" claim, and swapped the GitHub-release badge for a PyPI version badge.
+
 ## [0.10.0] - 2026-06-17
 
 ### Added
 
 - **PyPI packaging + `uvx` install.** `antigravity-intern` is now an installable
   package with an `antigravity-intern` console entry point, so it can be launched
-  with `uvx antigravity-intern` (isolated, always-latest) instead of a hardcoded
-  path to `server.py`.
+  with `uvx antigravity-intern` (isolated) instead of a hardcoded path to
+  `server.py`.
 - **MCP tool annotations.** All eight tools now carry MCP annotations
   (`readOnlyHint` / `idempotentHint` / `openWorldHint` / `title`) so clients can
   reason about which tools are safe — `antigravity_status` is read-only and
@@ -60,7 +72,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/SinanTufekci/antigravity-intern/releases/tag/v0.8.0
