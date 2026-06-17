@@ -7,7 +7,7 @@
 **Use Google's [Antigravity](https://antigravity.google/) (Gemini 3.5 Flash) as a sub-agent inside [Claude Code](https://claude.com/claude-code) — for text answers *and* image generation, on the AI Pro quota you already pay for.**
 
 [![CI](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml/badge.svg)](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/SinanTufekci/antigravity-intern?color=2ea44f)](https://github.com/SinanTufekci/antigravity-intern/releases/latest)
+[![PyPI](https://img.shields.io/pypi/v/antigravity-intern?logo=pypi&logoColor=white&color=2ea44f)](https://pypi.org/project/antigravity-intern/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
@@ -72,6 +72,27 @@ tool-calling steps. `antigravity_continue` pins the workspace's **exact** conver
 
 ## Set up in 60 seconds
 
+**Prerequisite (either method):** install agy and sign in to Antigravity **once** (via the IDE or
+`agy -i`) so it has a credential to reuse.
+
+### Recommended — no clone, auto-updating
+
+With [`uv`](https://docs.astral.sh/uv/) installed, register the bridge straight from
+[PyPI](https://pypi.org/project/antigravity-intern/) under `mcpServers` in `~/.claude.json`. `uvx`
+pulls the latest published release on every launch, in an isolated environment — no path to
+hardcode, no `git pull` to remember:
+
+```json
+"antigravity-intern": {
+  "command": "uvx",
+  "args": ["antigravity-intern"]
+}
+```
+
+### From source
+
+Clone it instead if you want to hack on the bridge or pin a local copy:
+
 ```bash
 git clone https://github.com/SinanTufekci/antigravity-intern.git
 cd antigravity-intern
@@ -80,11 +101,9 @@ python test_smoke.py        # 3 real round-trips (ask, continue, image) — shou
 ```
 
 > [!NOTE]
-> The smoke test costs a tiny bit of AI Pro quota and takes ~30–60 s. You must have logged into
-> Antigravity **once** (via the IDE or `agy -i`) so agy has a credential to reuse.
+> The smoke test costs a tiny bit of AI Pro quota and takes ~30–60 s.
 
-Then register the server with Claude Code — add this under `mcpServers` in `~/.claude.json`,
-using the absolute path to `server.py`:
+Then point Claude Code at the absolute path to `server.py` under `mcpServers` in `~/.claude.json`:
 
 <table>
 <tr><th>Windows</th><th>macOS / Linux</th></tr>
@@ -108,19 +127,6 @@ using the absolute path to `server.py`:
 
 </td></tr>
 </table>
-
-> [!TIP]
-> **No-clone, auto-updating install (recommended once published to PyPI):** skip the `git clone`
-> and let [`uvx`](https://docs.astral.sh/uv/) pull the latest published release on every launch —
-> no path to hardcode, no `git pull` to remember:
-> ```json
-> "antigravity-intern": {
->   "command": "uvx",
->   "args": ["antigravity-intern"]
-> }
-> ```
-> Each launch runs the newest version in an isolated environment. (The bridge is published to PyPI
-> automatically on every version tag — see [Releasing](#development).)
 
 Restart Claude Code. Eight tools appear: **`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_ask_watch`**, **`antigravity_image`**, **`antigravity_image_watch`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, and **`antigravity_status`** (each prefixed `mcp__antigravity-intern__`).
 
@@ -392,11 +398,11 @@ swarm) that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
 to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
 startup the server warns if your installed agy is newer than the version it was verified against.
 
-**Staying up to date.** The bridge is distributed by `git clone`, so it does not auto-update; pull
-and restart Claude Code to get new versions. To make that visible, on startup the server polls the
-GitHub tags API once and logs a one-line warning to stderr if a newer release tag exists than the
-running code (`__version__` in `server.py`). The check is best-effort — silent when offline or
-rate-limited, never blocks startup. Control it with:
+**Staying up to date.** The `uvx` install always runs the latest published release. A `git clone`
+does not auto-update — pull and restart Claude Code to get new versions. Either way, on startup the
+server polls the GitHub tags API once and logs a one-line warning to stderr if a newer release tag
+exists than the running code (`__version__` in `server.py`). The check is best-effort — silent when
+offline or rate-limited, never blocks startup. Control it with:
 
 | Env var | Effect |
 |---|---|
