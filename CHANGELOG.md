@@ -10,6 +10,15 @@ summary.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-06-18
+
+### Changed
+
+- Docs: document the in-chat update notice in the README — both surfaces (the
+  `bridge version` row in `antigravity_status`, visible in the client's chat,
+  and the startup stderr warning in host logs). Refreshes the PyPI
+  long-description.
+
 ## [0.10.2] - 2026-06-18
 
 ### Added
@@ -83,7 +92,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.9.0...v0.10.0
