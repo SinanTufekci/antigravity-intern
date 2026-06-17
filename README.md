@@ -78,16 +78,19 @@ tool-calling steps. `antigravity_continue` pins the workspace's **exact** conver
 ### Recommended — no clone, auto-updating
 
 With [`uv`](https://docs.astral.sh/uv/) installed, register the bridge straight from
-[PyPI](https://pypi.org/project/antigravity-intern/) under `mcpServers` in `~/.claude.json`. `uvx`
-pulls the latest published release on every launch, in an isolated environment — no path to
-hardcode, no `git pull` to remember:
+[PyPI](https://pypi.org/project/antigravity-intern/) under `mcpServers` in `~/.claude.json` — no
+path to hardcode, no `git pull` to remember:
 
 ```json
 "antigravity-intern": {
   "command": "uvx",
-  "args": ["antigravity-intern"]
+  "args": ["antigravity-intern@latest"]
 }
 ```
+
+The `@latest` suffix matters: it makes uvx fetch the newest published release on each launch (i.e.
+every Claude Code restart). Plain `uvx antigravity-intern` would pin to the first version it cached
+and **not** auto-upgrade. Drop `@latest` if you'd rather pin and upgrade manually.
 
 ### From source
 
@@ -398,11 +401,14 @@ swarm) that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
 to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
 startup the server warns if your installed agy is newer than the version it was verified against.
 
-**Staying up to date.** The `uvx` install always runs the latest published release. A `git clone`
-does not auto-update — pull and restart Claude Code to get new versions. Either way, on startup the
-server polls the GitHub tags API once and logs a one-line warning to stderr if a newer release tag
-exists than the running code (`__version__` in `server.py`). The check is best-effort — silent when
-offline or rate-limited, never blocks startup. Control it with:
+**Staying up to date.** A `uvx antigravity-intern@latest` install fetches the newest release on each
+launch (uvx caches by default, so the `@latest` suffix is what keeps it current — plain
+`uvx antigravity-intern` pins to the first-cached version). A `git clone` does not auto-update —
+pull and restart Claude Code. Either way, nothing updates a *running* server; new versions are
+picked up on the next Claude Code restart. To make that visible, on startup the server polls the
+GitHub tags API once and logs a one-line warning to stderr if a newer release tag exists than the
+running code (`__version__` in `server.py`). The check is best-effort — silent when offline or
+rate-limited, never blocks startup. Control it with:
 
 | Env var | Effect |
 |---|---|
