@@ -12,6 +12,7 @@
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
 [![agy 1.0.9 verified](https://img.shields.io/badge/agy-1.0.9%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
+[![Sponsor](https://img.shields.io/github/sponsors/SinanTufekci?logo=githubsponsors&label=Sponsor&color=ea4aaa)](https://github.com/sponsors/SinanTufekci)
 
 </div>
 
