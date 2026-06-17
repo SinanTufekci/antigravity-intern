@@ -377,6 +377,17 @@ swarm) that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
 to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
 startup the server warns if your installed agy is newer than the version it was verified against.
 
+**Staying up to date.** The bridge is distributed by `git clone`, so it does not auto-update; pull
+and restart Claude Code to get new versions. To make that visible, on startup the server polls the
+GitHub tags API once and logs a one-line warning to stderr if a newer release tag exists than the
+running code (`__version__` in `server.py`). The check is best-effort — silent when offline or
+rate-limited, never blocks startup. Control it with:
+
+| Env var | Effect |
+|---|---|
+| `AGY_BRIDGE_NO_UPDATE_CHECK=1` | Skip the GitHub check entirely (fully offline startup). |
+| `AGY_BRIDGE_REPO=owner/name` | Point the check at a fork instead of the upstream repo. |
+
 ## Contributing
 
 Personal project, **best-effort maintenance** — issues and PRs welcome, but no uptime/compat

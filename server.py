@@ -78,6 +78,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -86,6 +88,12 @@ from typing import Optional
 from fastmcp import FastMCP
 
 mcp = FastMCP("antigravity-intern")
+
+# The running bridge's version — the source of truth is THIS file (not the
+# installed package metadata, which goes stale on editable installs). Keep in
+# sync with pyproject.toml's version. Compared at startup against the latest
+# tag on GitHub so a long-lived clone learns when to `git pull`.
+__version__ = "0.9.0"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -97,6 +105,10 @@ log = logging.getLogger("agy_bridge")
 #   AGY_BIN=%LOCALAPPDATA%\agy\bin\agy.exe
 # Read once at import; the launching process's environment wins.
 AGY_BIN = os.environ.get("AGY_BIN", "agy")
+
+# GitHub repo polled at startup for a newer release tag. Override AGY_BRIDGE_REPO
+# if you run a fork; set AGY_BRIDGE_NO_UPDATE_CHECK=1 to skip the check entirely.
+GITHUB_REPO = os.environ.get("AGY_BRIDGE_REPO", "SinanTufekci/antigravity-intern")
 
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
@@ -153,14 +165,60 @@ def _compat_warning(version: Optional[tuple[int, int, int]]) -> Optional[str]:
     )
 
 
+def _env_truthy(name: str) -> bool:
+    """True if env var `name` is set to a truthy value (1/true/yes/on)."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _debug_enabled() -> bool:
     """True if AGY_BRIDGE_DEBUG is set to a truthy value (1/true/yes/on)."""
-    return os.environ.get("AGY_BRIDGE_DEBUG", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return _env_truthy("AGY_BRIDGE_DEBUG")
+
+
+def _fetch_latest_release_version() -> Optional[tuple[int, int, int]]:
+    """Best-effort: the highest semver tag published on GITHUB_REPO, or None.
+
+    Hits GitHub's public tags API (no auth) with a short timeout. ANY failure —
+    offline, DNS, rate-limit, HTTP error, unexpected JSON — returns None so the
+    server never blocks or errors on the network at startup.
+    """
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=100"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "antigravity-intern-bridge",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            tags = json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return None
+    if not isinstance(tags, list):  # e.g. a {"message": "rate limit"} error body
+        return None
+    versions = [
+        v
+        for v in (_parse_agy_version(t.get("name", "")) for t in tags if isinstance(t, dict))
+        if v is not None
+    ]
+    return max(versions) if versions else None
+
+
+def _update_warning(latest: Optional[tuple[int, int, int]]) -> Optional[str]:
+    """Return a warning if `latest` is a newer bridge version than this file.
+
+    None if no newer release is known, or if either version can't be parsed.
+    """
+    current = _parse_agy_version(__version__)
+    if latest is None or current is None or latest <= current:
+        return None
+    newest = ".".join(map(str, latest))
+    return (
+        f"A newer Antigravity Intern bridge is available: v{newest} "
+        f"(you are running v{__version__}). Update with `git pull` in the repo, "
+        "then restart Claude Code. Set AGY_BRIDGE_NO_UPDATE_CHECK=1 to silence this."
+    )
 
 
 def _spawn_kwargs() -> dict:
@@ -198,10 +256,19 @@ def _get_agy_version() -> Optional[str]:
 
 
 def _startup_checks() -> None:
-    """Warn (once, at startup) if the installed agy is newer than verified."""
-    warning = _compat_warning(_parse_agy_version(_get_agy_version() or ""))
-    if warning:
-        log.warning(warning)
+    """Warn (once, at startup) about a stale agy or a newer bridge release.
+
+    Both checks are best-effort and non-fatal: the agy check runs `agy --version`
+    locally; the update check polls GitHub (skipped via AGY_BRIDGE_NO_UPDATE_CHECK,
+    silent on any network failure).
+    """
+    agy_warning = _compat_warning(_parse_agy_version(_get_agy_version() or ""))
+    if agy_warning:
+        log.warning(agy_warning)
+    if not _env_truthy("AGY_BRIDGE_NO_UPDATE_CHECK"):
+        update_warning = _update_warning(_fetch_latest_release_version())
+        if update_warning:
+            log.warning(update_warning)
 
 
 def _configure_logging() -> None:

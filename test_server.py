@@ -254,6 +254,111 @@ def test_debug_enabled_false_for_falsy(monkeypatch, value):
 
 
 # --------------------------------------------------------------------------
+# _env_truthy  (generic truthy env-var reader behind _debug_enabled etc.)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_env_truthy_true(monkeypatch, value):
+    monkeypatch.setenv("AGY_TEST_FLAG", value)
+    assert server._env_truthy("AGY_TEST_FLAG") is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
+def test_env_truthy_false(monkeypatch, value):
+    monkeypatch.setenv("AGY_TEST_FLAG", value)
+    assert server._env_truthy("AGY_TEST_FLAG") is False
+
+
+def test_env_truthy_false_when_unset(monkeypatch):
+    monkeypatch.delenv("AGY_TEST_FLAG", raising=False)
+    assert server._env_truthy("AGY_TEST_FLAG") is False
+
+
+# --------------------------------------------------------------------------
+# _update_warning  (nag when a newer bridge tag exists on GitHub)
+# --------------------------------------------------------------------------
+
+
+def test_update_warning_warns_for_newer(monkeypatch):
+    monkeypatch.setattr(server, "__version__", "0.8.0")
+    msg = server._update_warning((0, 9, 0))
+    assert msg is not None
+    assert "0.9.0" in msg  # the newer version available
+    assert "0.8.0" in msg  # the version currently running
+    assert "git pull" in msg
+
+
+def test_update_warning_none_for_equal(monkeypatch):
+    monkeypatch.setattr(server, "__version__", "0.8.0")
+    assert server._update_warning((0, 8, 0)) is None
+
+
+def test_update_warning_none_for_older(monkeypatch):
+    monkeypatch.setattr(server, "__version__", "0.8.0")
+    assert server._update_warning((0, 7, 5)) is None
+
+
+def test_update_warning_none_when_latest_unknown():
+    assert server._update_warning(None) is None
+
+
+def test_update_warning_none_when_current_unparseable(monkeypatch):
+    monkeypatch.setattr(server, "__version__", "not-a-version")
+    assert server._update_warning((9, 9, 9)) is None
+
+
+# --------------------------------------------------------------------------
+# _fetch_latest_release_version  (GitHub tags API; never raises on the network)
+# --------------------------------------------------------------------------
+
+
+class _FakeResp:
+    """Minimal urlopen() stand-in: works as a context manager and feeds json.load."""
+
+    def __init__(self, body: str):
+        self._body = body.encode()
+
+    def read(self, *_a):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+def test_fetch_latest_release_version_picks_highest(monkeypatch):
+    body = '[{"name": "v0.5.0"}, {"name": "v0.8.0"}, {"name": "v0.7.1"}, {"name": "nightly"}]'
+    monkeypatch.setattr(server.urllib.request, "urlopen", lambda *a, **k: _FakeResp(body))
+    assert server._fetch_latest_release_version() == (0, 8, 0)
+
+
+def test_fetch_latest_release_version_none_on_network_error(monkeypatch):
+    def _raise(*_a, **_k):
+        raise server.urllib.error.URLError("offline")
+
+    monkeypatch.setattr(server.urllib.request, "urlopen", _raise)
+    assert server._fetch_latest_release_version() is None
+
+
+def test_fetch_latest_release_version_none_on_non_list(monkeypatch):
+    # rate-limit / error bodies come back as a JSON object, not a list of tags
+    monkeypatch.setattr(
+        server.urllib.request, "urlopen", lambda *a, **k: _FakeResp('{"message": "rate limited"}')
+    )
+    assert server._fetch_latest_release_version() is None
+
+
+def test_fetch_latest_release_version_none_when_no_semver_tags(monkeypatch):
+    monkeypatch.setattr(
+        server.urllib.request, "urlopen", lambda *a, **k: _FakeResp('[{"name": "latest"}]')
+    )
+    assert server._fetch_latest_release_version() is None
+
+
+# --------------------------------------------------------------------------
 # _spawn_kwargs  (console-detach so agy's TTY writes don't leak to the host)
 # --------------------------------------------------------------------------
 
@@ -309,6 +414,7 @@ def test_build_agy_args_honors_custom_agy_bin(monkeypatch):
 
 def test_startup_checks_warns_on_newer_agy(monkeypatch, caplog):
     monkeypatch.setattr(server, "_get_agy_version", lambda: "2.0.0")
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert "newer" in caplog.text
@@ -316,6 +422,7 @@ def test_startup_checks_warns_on_newer_agy(monkeypatch, caplog):
 
 def test_startup_checks_silent_on_verified_agy(monkeypatch, caplog):
     monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert caplog.text == ""
@@ -323,6 +430,31 @@ def test_startup_checks_silent_on_verified_agy(monkeypatch, caplog):
 
 def test_startup_checks_silent_when_agy_unavailable(monkeypatch, caplog):
     monkeypatch.setattr(server, "_get_agy_version", lambda: None)
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
+    caplog.set_level("WARNING", logger="agy_bridge")
+    server._startup_checks()
+    assert caplog.text == ""
+
+
+def test_startup_checks_warns_on_newer_bridge_release(monkeypatch, caplog):
+    # agy is fine; a newer bridge tag exists on GitHub -> update nag fires.
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setattr(server, "__version__", "0.8.0")
+    monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: (0, 9, 0))
+    caplog.set_level("WARNING", logger="agy_bridge")
+    server._startup_checks()
+    assert "0.9.0" in caplog.text
+    assert "git pull" in caplog.text
+
+
+def test_startup_checks_skips_update_check_when_disabled(monkeypatch, caplog):
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setenv("AGY_BRIDGE_NO_UPDATE_CHECK", "1")
+
+    def _boom():
+        raise AssertionError("update check must not run when disabled")
+
+    monkeypatch.setattr(server, "_fetch_latest_release_version", _boom)
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert caplog.text == ""
