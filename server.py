@@ -75,8 +75,11 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -334,6 +337,50 @@ def _entry_to_progress(entry: dict) -> Optional[str]:
     if etype == "RUN_COMMAND":
         return "running a command…"
     return None
+
+
+def _clean_tool_arg(value) -> str:
+    """Unwrap a tool-call arg. agy stores them JSON-encoded (a quoted/escaped
+    string inside the string), so one json.loads turns e.g. CommandLine into the
+    real command. Falls back to the raw value if it isn't double-encoded."""
+    if not isinstance(value, str):
+        return "" if value is None else str(value)
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, str):
+            return decoded.strip()
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return value.strip()
+
+
+def _entry_to_watch_lines(entry: dict) -> list[tuple[str, str]]:
+    """Richer per-entry breakdown for the watch window: the model's narration,
+    the ACTUAL command it runs (from tool_calls), and a command-finished marker.
+
+    Returns a list of (kind, text) where kind is 'narration' | 'command' |
+    'result'; the viewer maps kind to colour/symbol. Unlike _entry_to_progress
+    (one plain line, used for MCP notifications), this can yield two lines for one
+    planner step (its narration + the command) and surfaces the real command.
+    """
+    if entry.get("source") != "MODEL":
+        return []
+    etype = entry.get("type")
+    lines: list[tuple[str, str]] = []
+    if etype == "PLANNER_RESPONSE":
+        content = entry.get("content")
+        if content:
+            lines.append(("narration", content.strip().splitlines()[0][:200]))
+        for call in entry.get("tool_calls") or []:
+            args = (call or {}).get("args") or {}
+            cmd = _clean_tool_arg(args.get("CommandLine"))
+            if not cmd:
+                cmd = _clean_tool_arg(args.get("toolSummary") or args.get("toolAction"))
+            if cmd:
+                lines.append(("command", cmd[:200]))
+    elif etype == "RUN_COMMAND":
+        lines.append(("result", "command finished"))
+    return lines
 
 
 # Canonical extension per detected image format. Drives extension-correction:
@@ -726,6 +773,585 @@ def _run_agy_streamed(
                 time.sleep(_RESPONSE_POLL_INTERVAL_S)
 
 
+# Live "watch" viewer state, served over a localhost HTTP server to a browser
+# page. One server + one shared state per bridge process (agy runs are serialized
+# by _AGY_LOCK, so only one run writes at a time). The browser polls /events.
+_WATCH_STATE: dict = {
+    "title": "",
+    "status": "idle",  # idle | working | done | error
+    "started": 0.0,
+    "elapsed": 0.0,
+    "answer": "",
+    "image": "",  # absolute path to a generated image to show, or ""
+    "events": [],  # list of {kind, text, t}
+}
+_WATCH_STATE_LOCK = threading.Lock()
+_WATCH_SERVER: Optional[tuple] = None  # (httpd, port, thread) singleton
+
+
+def _watch_reset(title: str, start: float) -> None:
+    with _WATCH_STATE_LOCK:
+        _WATCH_STATE.update(
+            title=title,
+            status="working",
+            started=start,
+            elapsed=0.0,
+            answer="",
+            image="",
+            events=[],
+        )
+
+
+def _watch_set_image(path: str) -> None:
+    with _WATCH_STATE_LOCK:
+        _WATCH_STATE["image"] = path
+
+
+def _watch_append(events: list[dict]) -> None:
+    with _WATCH_STATE_LOCK:
+        _WATCH_STATE["events"].extend(events)
+        _WATCH_STATE["elapsed"] = round(time.time() - _WATCH_STATE["started"], 1)
+
+
+def _watch_finish(status: str, answer: str, elapsed: float) -> None:
+    with _WATCH_STATE_LOCK:
+        _WATCH_STATE["status"] = status
+        _WATCH_STATE["answer"] = answer
+        _WATCH_STATE["elapsed"] = round(elapsed, 1)
+
+
+def _watch_snapshot() -> dict:
+    with _WATCH_STATE_LOCK:
+        snap = dict(_WATCH_STATE)
+        snap["events"] = list(_WATCH_STATE["events"])
+        return snap
+
+
+class _WatchFeed:
+    """Locks onto this run's conversation and turns new transcript entries into
+    rich step events (narration / command / result) appended to the shared watch
+    state. Mirrors _ProgressStream's lock-on, but emits the richer watch lines."""
+
+    def __init__(self, pinned_conv: Optional[str], start: float) -> None:
+        self._start = start
+        self._pre = set() if pinned_conv else _existing_conv_names()
+        self._conv = pinned_conv
+        self._cursor = len(_transcript_entries(pinned_conv)) if pinned_conv else 0
+
+    @property
+    def conv(self) -> Optional[str]:
+        return self._conv
+
+    def pump(self) -> None:
+        if self._conv is None:
+            self._conv = _newest_new_conv(self._start, self._pre)
+            if self._conv is None:
+                return
+            self._cursor = 0
+        entries = _transcript_entries(self._conv)
+        new_events = []
+        for entry in entries[self._cursor :]:
+            for kind, text in _entry_to_watch_lines(entry):
+                t = round(time.time() - self._start, 1)
+                new_events.append({"kind": kind, "text": text, "t": t})
+        self._cursor = max(self._cursor, len(entries))
+        if new_events:
+            _watch_append(new_events)
+
+
+# Self-contained dark-theme page: polls /events and renders steps live, with a
+# spinner while working and the final answer card on completion. Resets its view
+# when `started` changes, so one browser tab can be reused across runs.
+# Terminal-styled page with typewriter step reveal and a Markdown-rendered answer.
+# __WIN_W__/__WIN_H__ are substituted per request (see _watch_html).
+_WATCH_HTML = """<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Wingman — watching agy</title>
+<style>
+:root{
+ --bg:#0a0c10;--fg:#d6d6d6;--dim:#677;--green:#3fdf7f;--cyan:#5cd6e6;
+ --bd:#191c22;--code:#06080b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg)}
+body{
+ color:var(--fg);padding-bottom:30px;
+ font:13px/1.6 ui-monospace,"Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+}
+::-webkit-scrollbar{width:9px}::-webkit-scrollbar-thumb{background:#23262d}
+.top{position:sticky;top:0;z-index:3;background:var(--bg)}
+header{
+ display:flex;align-items:center;gap:8px;
+ padding:8px 13px;background:#0d0f14;border-bottom:1px solid var(--bd);
+ font-size:12px;color:var(--dim);
+}
+.name{color:var(--green);font-weight:700;text-shadow:0 0 10px rgba(63,223,127,.4)}
+.wlabel{color:var(--dim)}
+.pill{margin-left:auto;display:flex;align-items:center;gap:8px}
+.dot{
+ width:7px;height:7px;border-radius:50%;background:var(--green);
+ box-shadow:0 0 9px var(--green);
+}
+.spin{
+ color:var(--green);display:inline-block;width:9px;text-align:center;
+ text-shadow:0 0 8px rgba(63,223,127,.6);
+}
+#elapsed{color:#556}
+main{padding:11px 14px}
+.sub{
+ position:relative;color:var(--dim);font-size:12px;padding:8px 14px 9px;
+ cursor:pointer;border-bottom:1px solid var(--bd);
+ max-height:3.6em;overflow:hidden;transition:max-height .2s ease;
+}
+.sub:hover{background:#0f1116}
+.sub .tag{
+ color:var(--green);font-weight:700;font-size:9.5px;letter-spacing:1.6px;
+ margin-right:8px;
+}
+.sub .chev{float:right;color:var(--green);opacity:.8;margin-left:8px}
+.subtext{white-space:pre-wrap;word-break:break-word}
+.sub::after{
+ content:"";position:absolute;left:0;right:0;bottom:0;height:15px;
+ background:linear-gradient(transparent,var(--bg));pointer-events:none;
+}
+.sub.expanded{max-height:46vh;overflow:auto}
+.sub.expanded::after{display:none}
+.row{
+ display:flex;gap:9px;align-items:baseline;padding:2px 0;
+ animation:slide .22s ease both;
+}
+@keyframes slide{from{opacity:0;transform:translateX(-6px)}}
+.t{color:#4a4f57;min-width:50px;text-align:right;font-size:11px}
+.sym{width:10px;flex:none}
+.txt{white-space:pre-wrap;word-break:break-word}
+.command .sym{color:var(--green)}
+.command .txt{color:#f2f2f2}
+.narration .sym,.narration .txt{color:var(--cyan)}
+.result .sym,.result .txt{color:var(--green);opacity:.5}
+.cur{
+ display:inline-block;width:7px;height:14px;background:var(--green);
+ vertical-align:-2px;box-shadow:0 0 8px var(--green);
+ animation:blink 1.05s steps(1) infinite;
+}
+@keyframes blink{50%{opacity:0}}
+.sep{
+ display:flex;align-items:center;gap:10px;margin:22px 0 12px;
+ animation:slide .3s ease both;
+}
+.sep::before,.sep::after{content:"";height:1px;background:var(--bd);flex:1}
+.seplabel{
+ font-size:10px;letter-spacing:2.5px;color:var(--green);font-weight:700;opacity:.9;
+}
+.answer{
+ animation:fade .4s ease both;background:#0c0e13;
+ border:1px solid var(--bd);border-radius:8px;padding:13px 15px;
+}
+@keyframes fade{from{opacity:0}}
+.answer .h{font-weight:700;margin:13px 0 5px;color:#cdd9e5}
+.answer .h1{font-size:16px;color:#fff}
+.answer .h2{font-size:14px}
+.answer .h3{font-size:12.5px;color:var(--green)}
+.answer .p{margin:3px 0;white-space:pre-wrap;word-break:break-word}
+.answer .li{display:flex;gap:8px;margin:2px 0}
+.answer .bul{color:var(--green);flex:none;min-width:14px;text-align:right}
+.answer .lit{white-space:pre-wrap;word-break:break-word}
+.answer pre.code{
+ background:var(--code);border-left:2px solid var(--green);border-radius:4px;
+ padding:9px 11px;margin:7px 0;overflow:auto;white-space:pre;color:#e9efe9;
+}
+.answer code{background:#16191f;padding:1px 5px;border-radius:4px;color:#9fe6ad}
+.answer .lnk{color:var(--cyan);border-bottom:1px dotted #2a6b73}
+.answer strong{color:#fff}
+.shot{
+ max-width:100%;border:1px solid var(--bd);border-radius:8px;
+ margin:10px 0 4px;display:block;animation:fade .4s ease both;
+}
+.hint{
+ position:fixed;bottom:7px;right:12px;color:#3b414a;font-size:10.5px;
+ pointer-events:none;user-select:none;
+}
+</style></head><body>
+<div class="top">
+ <header>
+  <span class="name">Wingman</span><span class="wlabel">— watching agy</span>
+  <span class="pill" id="pill">
+   <span class="dot" id="dot" style="display:none"></span>
+   <span class="spin" id="spin"></span>
+   <span id="status">working</span><span id="elapsed"></span>
+  </span>
+ </header>
+ <div class="sub" id="sub" title="click to expand / collapse">
+  <span class="chev" id="chev">▾</span><span class="tag">PROMPT</span><span
+   class="subtext" id="subtext"></span>
+ </div>
+</div>
+<main>
+ <div id="steps"></div>
+ <div id="live"><span class="cur"></span></div>
+ <div id="answerWrap"></div>
+</main>
+<div class="hint">⏎ / esc · close</div>
+<script>
+try{window.resizeTo(__WIN_W__,__WIN_H__);}catch(e){}
+document.addEventListener("keydown",e=>{
+ if(e.key==="Enter"||e.key==="Escape"){try{window.close();}catch(_){}}
+});
+const SYM={narration:"▸",command:"$",result:"✓"};
+let seen=0,started=null,finished=false,tq=[],typing=false;
+const $=id=>document.getElementById(id);
+$("sub").addEventListener("click",()=>{
+ const ex=$("sub").classList.toggle("expanded");$("chev").textContent=ex?"▴":"▾";
+});
+function toBottom(){window.scrollTo(0,document.body.scrollHeight);}
+const FR="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";let fi=0,spinT=null;
+function startSpin(){
+ if(spinT)return;
+ spinT=setInterval(()=>{$("spin").textContent=FR[fi=(fi+1)%FR.length];},80);
+}
+function stopSpin(){if(spinT){clearInterval(spinT);spinT=null;}$("spin").textContent="";}
+function reset(){
+ $("steps").innerHTML="";$("answerWrap").innerHTML="";
+ $("live").style.display="";$("dot").style.display="none";
+ $("status").textContent="working";seen=0;finished=false;tq=[];typing=false;startSpin();
+}
+function drain(){
+ if(!tq.length){typing=false;return;}
+ typing=true;const[el,text]=tq.shift();let i=0;
+ (function step(){
+  el.textContent=text.slice(0,i++);toBottom();
+  if(i<=text.length)setTimeout(step,text.length>90?3:9);else drain();
+ })();
+}
+function type(el,text){tq.push([el,text]);if(!typing)drain();}
+function addStep(e){
+ const row=document.createElement("div");row.className="row "+e.kind;
+ const t=document.createElement("span");t.className="t";
+ t.textContent="["+e.t.toFixed(1)+"s]";
+ const sy=document.createElement("span");sy.className="sym";
+ sy.textContent=SYM[e.kind]||"·";
+ const tx=document.createElement("span");tx.className="txt";
+ row.append(t,sy,tx);$("steps").appendChild(row);type(tx,e.text);
+}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function inl(s){
+ return s.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,"<span class='lnk'>$1</span>")
+         .replace(/`([^`]+)`/g,(m,c)=>"<code>"+c+"</code>")
+         .replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>");
+}
+function md(src){
+ const lines=esc(src).split("\\n"),out=[];let inC=false,code="";
+ for(const ln of lines){
+  const f=ln.match(/^```(\\w*)\\s*$/);
+  if(f){if(!inC){inC=true;code="";}else{inC=false;
+   out.push("<pre class='code'>"+code.replace(/\\n$/,"")+"</pre>");}continue;}
+  if(inC){code+=ln+"\\n";continue;}
+  const h=ln.match(/^(#{1,6})\\s+(.*)$/);
+  if(h){out.push("<div class='h h"+h[1].length+"'>"+inl(h[2])+"</div>");continue;}
+  const b=ln.match(/^\\s*[-*]\\s+(.*)$/);
+  if(b){out.push("<div class='li'><span class='bul'>•</span>"+
+   "<span class='lit'>"+inl(b[1])+"</span></div>");continue;}
+  const n=ln.match(/^\\s*(\\d+)\\.\\s+(.*)$/);
+  if(n){out.push("<div class='li'><span class='bul'>"+n[1]+".</span>"+
+   "<span class='lit'>"+inl(n[2])+"</span></div>");continue;}
+  if(ln.trim()==="")continue;
+  out.push("<div class='p'>"+inl(ln)+"</div>");
+ }
+ if(inC)out.push("<pre class='code'>"+code+"</pre>");
+ return out.join("");
+}
+function finish(s){
+ finished=true;stopSpin();$("live").style.display="none";$("dot").style.display="";
+ const verb=s.status==="error"?"failed":"done";
+ $("status").textContent=verb+" in "+(s.elapsed||0).toFixed(1)+"s";
+ const w=$("answerWrap");
+ if(s.answer||s.image){
+  const sep=document.createElement("div");sep.className="sep";
+  sep.innerHTML="<span class='seplabel'>OUTPUT</span>";w.appendChild(sep);
+ }
+ if(s.image){
+  const im=document.createElement("img");im.className="shot";
+  im.onload=toBottom;im.src="/image?"+encodeURIComponent(s.image);w.appendChild(im);
+ }
+ if(s.answer){
+  const a=document.createElement("div");a.className="answer";
+  a.innerHTML=md(s.answer);w.appendChild(a);
+ }
+ toBottom();
+}
+async function tick(){
+ try{
+  const s=await (await fetch("/events",{cache:"no-store"})).json();
+  if(s.started!==started){started=s.started;reset();}
+  $("subtext").textContent=s.title||"";
+  $("elapsed").textContent=s.elapsed?s.elapsed.toFixed(1)+"s":"";
+  for(let i=seen;i<s.events.length;i++)addStep(s.events[i]);
+  seen=s.events.length;
+  if((s.status==="done"||s.status==="error")&&!finished)finish(s);
+ }catch(e){}
+ setTimeout(tick,finished?1500:400);
+}
+startSpin();tick();
+</script></body></html>"""
+
+
+def _watch_html() -> str:
+    """The watch page with the configured window size substituted for resizeTo."""
+    w, h = 600, 820
+    try:
+        parts = [int(x) for x in _WATCH_WINDOW_SIZE.split(",")]
+        if len(parts) == 2:
+            w, h = parts
+    except ValueError:
+        pass
+    return _WATCH_HTML.replace("__WIN_W__", str(w)).replace("__WIN_H__", str(h))
+
+
+def _ensure_watch_server() -> int:
+    """Lazily start the localhost watch server (once per process); return its port.
+
+    Binds 127.0.0.1 only — the page and events never leave the local machine.
+    """
+    global _WATCH_SERVER
+    if _WATCH_SERVER is not None:
+        return _WATCH_SERVER[1]
+
+    class _Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):  # silence default stderr request logging
+            pass
+
+        def _send(self, body: bytes, content_type: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802 (http.server API)
+            if self.path.startswith("/events"):
+                self._send(json.dumps(_watch_snapshot()).encode("utf-8"), "application/json")
+            elif self.path.startswith("/image"):
+                path = _watch_snapshot().get("image") or ""
+                fmt = _detect_image_format(path) if path and os.path.isfile(path) else None
+                if fmt:
+                    mime = {
+                        "JPEG": "image/jpeg",
+                        "PNG": "image/png",
+                        "GIF": "image/gif",
+                        "WEBP": "image/webp",
+                    }[fmt]
+                    with open(path, "rb") as fh:
+                        self._send(fh.read(), mime)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            else:
+                self._send(_watch_html().encode("utf-8"), "text/html; charset=utf-8")
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    _WATCH_SERVER = (httpd, port, thread)
+    log.debug("watch server on http://127.0.0.1:%d", port)
+    return port
+
+
+# Small dedicated viewer window. Override "WIDTH,HEIGHT" via AGY_WATCH_WINDOW_SIZE.
+_WATCH_WINDOW_SIZE = os.environ.get("AGY_WATCH_WINDOW_SIZE", "560,760")
+
+
+def _chromium_app_browsers() -> list[str]:
+    """Paths to Chromium-based browsers that support `--app` windowed mode, so the
+    viewer can open as a small chromeless window instead of a tab. Best-effort."""
+    found: list[str] = []
+    if os.name == "nt":
+        pf = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+        pfx86 = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+        local = os.environ.get("LOCALAPPDATA", "")
+        candidates = [
+            os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(pfx86, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(pfx86, "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+        ]
+        found += [p for p in candidates if os.path.isfile(p)]
+    elif sys.platform == "darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ]
+        found += [p for p in candidates if os.path.isfile(p)]
+    for name in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "brave-browser",
+        "microsoft-edge",
+    ):
+        path = shutil.which(name)
+        if path:
+            found.append(path)
+    return found
+
+
+def _open_watch_window(url: str) -> None:
+    """Open the watch page in a small, dedicated window. Prefers a Chromium browser
+    in `--app` mode (a sized, chromeless window — not a tab); falls back to a normal
+    new browser window/tab. Best-effort — never raises."""
+    for exe in _chromium_app_browsers():
+        try:
+            subprocess.Popen(
+                [exe, f"--app={url}", f"--window-size={_WATCH_WINDOW_SIZE}"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **_spawn_kwargs(),
+            )
+            return
+        except OSError:
+            continue
+    try:
+        webbrowser.open(url, new=1)  # request a new window (clients may still tab)
+    except Exception:  # noqa: BLE001 - viewer is best-effort
+        pass
+
+
+def _run_agy_watched(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -> str:
+    """Like _run_agy, but open a live browser "watch" view. EXPERIMENTAL.
+
+    agy runs headless (console-detached, no leak); alongside it, the bridge serves
+    a small localhost page and opens your browser to it, live-streaming agy's steps
+    (narration + the real commands it runs) read from the transcript. The return
+    value is identical to agy_ask. The viewer is best-effort and cross-platform
+    (any browser); if it can't open, the run still completes normally.
+    """
+    args, pinned_conv = _build_agy_args(prompt, workspace, continue_conv, timeout_s)
+
+    with _AGY_LOCK:
+        start = time.time()
+        feed = _WatchFeed(pinned_conv, start)
+        title = prompt.strip().splitlines()[0] if prompt.strip() else ""
+        if len(title) > 200:
+            title = title[:200].rsplit(" ", 1)[0] + "…"
+        _watch_reset(title, start)
+        try:
+            port = _ensure_watch_server()
+            _open_watch_window(f"http://127.0.0.1:{port}/")
+        except Exception:  # noqa: BLE001 - the viewer is best-effort, never fatal
+            pass
+
+        proc = subprocess.Popen(
+            args,
+            cwd=workspace,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **_spawn_kwargs(),  # agy stays headless; the browser is the viewer
+        )
+        hard_deadline = start + timeout_s + 30
+        while proc.poll() is None:
+            if time.time() > hard_deadline:
+                proc.kill()
+                _watch_finish("error", "(timed out)", time.time() - start)
+                raise RuntimeError(f"agy timed out after {timeout_s + 30}s (watched)")
+            feed.pump()
+            time.sleep(_PROGRESS_POLL_INTERVAL_S)
+        feed.pump()  # drain entries flushed right before exit
+
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            _watch_finish("error", f"(agy exited {proc.returncode})", time.time() - start)
+            raise RuntimeError(f"agy exited {proc.returncode}\nstderr: {(stderr or '')[-1000:]}")
+
+        deadline = time.time() + _RESPONSE_POLL_DEADLINE_S
+        while True:
+            try:
+                answer = _resolve_and_read(pinned_conv or feed.conv, workspace, start)
+                break
+            except RuntimeError:
+                if time.time() >= deadline:
+                    _watch_finish("error", "(no answer found)", time.time() - start)
+                    raise
+                time.sleep(_RESPONSE_POLL_INTERVAL_S)
+        _watch_finish("done", answer, time.time() - start)
+        return answer
+
+
+def _run_agy_image_watched(
+    wrapped_prompt: str, target: str, workspace: str, timeout_s: int, display_prompt: str
+) -> str:
+    """Generate an image with a live watch window that also displays the result.
+
+    EXPERIMENTAL. Runs agy headless, streams its steps to the Wingman window,
+    finalises the generated image (extension corrected to the real bytes), shows
+    it in the window, and returns the same string as agy_image. `display_prompt`
+    is the user's original prompt, shown as the window title (not the wrapped
+    save-path instructions that actually go to agy).
+    """
+    args, _ = _build_agy_args(wrapped_prompt, workspace, False, timeout_s)
+
+    with _AGY_LOCK:
+        start = time.time()
+        feed = _WatchFeed(None, start)
+        title = display_prompt.strip().splitlines()[0] if display_prompt.strip() else "image"
+        if len(title) > 200:
+            title = title[:200].rsplit(" ", 1)[0] + "…"
+        _watch_reset(title, start)
+        try:
+            port = _ensure_watch_server()
+            _open_watch_window(f"http://127.0.0.1:{port}/")
+        except Exception:  # noqa: BLE001 - viewer is best-effort
+            pass
+
+        proc = subprocess.Popen(
+            args,
+            cwd=workspace,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **_spawn_kwargs(),
+        )
+        hard_deadline = start + timeout_s + 30
+        while proc.poll() is None:
+            if time.time() > hard_deadline:
+                proc.kill()
+                _watch_finish("error", "(timed out)", time.time() - start)
+                raise RuntimeError(f"agy timed out after {timeout_s + 30}s (image/watch)")
+            feed.pump()
+            time.sleep(_PROGRESS_POLL_INTERVAL_S)
+        feed.pump()
+        proc.communicate()
+
+        # The transcript read may fail even though the image was written; don't lose
+        # a produced image to a transcript hiccup (mirrors agy_image).
+        agy_text = None
+        agy_error = None
+        try:
+            agy_text = _resolve_and_read(feed.conv, workspace, start)
+        except RuntimeError as e:
+            agy_error = e
+
+        try:
+            final_path, fmt, size = _finalize_image(target, agy_text, start)
+        except RuntimeError as fin_err:
+            _watch_finish("error", f"no image produced: {fin_err}", time.time() - start)
+            if agy_error is not None:
+                raise RuntimeError(f"{fin_err} (agy also failed: {agy_error})") from agy_error
+            raise
+
+        _watch_set_image(final_path)
+        caption = f"Saved to {final_path}\nformat={fmt} · {size} bytes"
+        _watch_finish("done", caption, time.time() - start)
+        return f"{final_path}\nformat={fmt}  size={size} bytes"
+
+
 @mcp.tool()
 def agy_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
     """Ask Antigravity (Gemini 3.5 Flash High via agy CLI) a question in a NEW conversation.
@@ -808,6 +1434,30 @@ def agy_ask_stream(
 
 
 @mcp.tool()
+def agy_ask_watch(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
+    """EXPERIMENTAL: like agy_ask, but open a live "watch" view in your browser.
+
+    Starts a NEW conversation and returns the same final text as agy_ask. agy
+    itself runs headless (nothing leaks into your terminal); ALONGSIDE it, the
+    bridge serves a small page on localhost and opens your browser to it, live-
+    streaming agy's steps as it works — its narration and the real commands it runs
+    — read from the transcript. agy's own `-p` console can't show this (it renders
+    only at the end).
+
+    Cross-platform (any browser) and best-effort: if the browser can't open, the
+    run still completes normally. Steps are coarse — the transcript flushes in
+    chunks — not token-level. The page is served on 127.0.0.1 only.
+
+    Args:
+        prompt: Question or instruction for Antigravity.
+        workspace: Working directory for the conversation. Defaults to cwd.
+        timeout_s: Max seconds to wait for agy to complete. Default 180.
+    """
+    ws = _normalize_workspace(workspace)
+    return _run_agy_watched(prompt, ws, continue_conv=False, timeout_s=timeout_s)
+
+
+@mcp.tool()
 def agy_image(
     prompt: str,
     output_path: Optional[str] = None,
@@ -857,6 +1507,36 @@ def agy_image(
             raise RuntimeError(f"{fin_err} (agy also failed: {agy_error})") from agy_error
         raise
     return f"{final_path}\nformat={fmt}  size={size} bytes"
+
+
+@mcp.tool()
+def agy_image_watch(
+    prompt: str,
+    output_path: Optional[str] = None,
+    workspace: Optional[str] = None,
+    timeout_s: int = 240,
+) -> str:
+    """EXPERIMENTAL: like agy_image, but stream progress and SHOW the image live.
+
+    Generates an image exactly like agy_image (same save path / format-correction /
+    return value), but opens the Wingman browser window, streams agy's steps as it
+    works, and displays the finished image inline in that window. Best-effort and
+    cross-platform; if the window can't open the image is still generated and
+    returned. Same privileges/caveats as the other tools (see the module SECURITY
+    note).
+
+    Args:
+        prompt: Description of the image to generate.
+        output_path: Where to save. Absolute, or relative to `workspace`. If
+                     omitted, a timestamped name under `workspace` is used.
+        workspace: Working directory for the conversation. Defaults to cwd.
+        timeout_s: Max seconds to wait for agy to complete. Default 240.
+    """
+    ws = _normalize_workspace(workspace)
+    target = _resolve_output_path(output_path, ws)
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+    wrapped = _wrap_image_prompt(prompt, target)
+    return _run_agy_image_watched(wrapped, target, ws, timeout_s, prompt)
 
 
 @mcp.tool()

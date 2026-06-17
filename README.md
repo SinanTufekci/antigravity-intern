@@ -105,7 +105,7 @@ using the absolute path to `server.py`:
 </td></tr>
 </table>
 
-Restart Claude Code. Five tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_ask_stream`**, **`mcp__agy__agy_status`**, and **`mcp__agy__agy_image`**.
+Restart Claude Code. Seven tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_ask_stream`**, **`mcp__agy__agy_ask_watch`**, **`mcp__agy__agy_image`**, **`mcp__agy__agy_image_watch`**, and **`mcp__agy__agy_status`**.
 
 > *"Use agy_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -118,8 +118,10 @@ Restart Claude Code. Five tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__ag
 | `agy_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
 | `agy_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
 | `agy_ask_stream(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `agy_ask`, but emits agy's intermediate steps as MCP **progress notifications** while it works (coarse — see [FAQ](#faq)). |
-| `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
+| `agy_ask_watch(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `agy_ask`, but opens the **Wingman** live browser window so you can watch agy work (see [Watch mode](#watch-mode)). |
 | `agy_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
+| `agy_image_watch(prompt, output_path?, workspace?, timeout_s?=240)` | 🧪 **Experimental.** Like `agy_image`, but streams progress and **shows the generated image** in the Wingman window. |
+| `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
 
 `workspace` defaults to the MCP server's current working directory. Point it at a real project dir
 for context-aware answers — agy gives the model access to files under that root.
@@ -130,6 +132,28 @@ corrects the file extension to match the real bytes: agy's image model picks the
 format itself (JPEG for photo-like images, PNG for flat graphics), so a requested
 `out.png` may come back as `out.jpg`. The returned path always reflects the true
 format.
+
+<a id="watch-mode"></a>
+
+## 👁️ Watch mode — Wingman (experimental)
+
+`agy_ask_watch` / `agy_image_watch` do the same work as `agy_ask` / `agy_image`, but
+let you **watch agy work live in a little terminal-style browser window** called
+**Wingman**. agy still runs headless; alongside it the bridge serves a tiny page on
+`127.0.0.1` and opens it in a small, chromeless app window that streams agy's steps —
+its planner narration (▸), the **real commands** it runs (`$`), and completions (✓) —
+read live from the transcript, with the final answer rendered as Markdown (and, for
+`agy_image_watch`, the generated image shown inline).
+
+- **Cross-platform & best-effort.** Prefers a Chromium browser (`--app` mode) for the
+  windowed look; falls back to a normal browser window. If nothing can open, the run
+  still completes and returns normally.
+- **Window size.** Set **`AGY_WATCH_WINDOW_SIZE`** (e.g. `AGY_WATCH_WINDOW_SIZE=480,700`)
+  to resize the window; default is `560,760`. Press **Enter / Esc** in the window to
+  close it.
+- **Coarse, not token-level.** agy flushes its transcript in chunks, so you get a
+  handful of live steps, not character streaming. The returned value is identical to
+  the non-watch tool. Nothing is sent anywhere but your own machine.
 
 ## Model & auth
 
@@ -274,6 +298,9 @@ requests queue rather than race — plan latency accordingly under load.
 - 🧪 **Streaming is experimental** — `agy_ask_stream` emits coarse progress notifications (verified
   sent via a compliant MCP client), but **Claude Code doesn't surface them mid-call**, so there you
   see only the final answer; see the [FAQ](#faq).
+- 👁️ **Watch mode is experimental** — `agy_ask_watch` / `agy_image_watch` open the **Wingman**
+  browser window to watch agy work live (coarse steps; image shown inline). Best-effort and
+  cross-platform; see [Watch mode](#watch-mode).
 - 🔒 **No real sandbox** — agy's `--sandbox` (since 1.0.6) blocks only shell commands in `-p` but still
   leaves file writes and network egress open (and breaks transcript reading), so it's no boundary;
   see [Security](#security).

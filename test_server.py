@@ -510,6 +510,51 @@ def test_transcript_entries_missing_returns_empty(brain_dir):
     assert server._transcript_entries("nope") == []
 
 
+# --------------------------------------------------------------------------
+# watch-mode formatters: _clean_tool_arg / _entry_to_watch_lines
+# --------------------------------------------------------------------------
+
+
+def test_clean_tool_arg_unwraps_json_encoded():
+    # agy stores args double-encoded: a quoted/escaped string inside a string.
+    assert server._clean_tool_arg('"python -c \\"print(1)\\""') == 'python -c "print(1)"'
+    assert server._clean_tool_arg('"Compute 50 factorial"') == "Compute 50 factorial"
+
+
+def test_clean_tool_arg_passthrough_and_none():
+    assert server._clean_tool_arg("plain text") == "plain text"
+    assert server._clean_tool_arg(None) == ""
+
+
+def test_entry_to_watch_lines_planner_narration_and_command():
+    cmd_arg = '"python -c \\"print(1)\\""'  # double-encoded as agy stores it
+    entry = {
+        "source": "MODEL",
+        "type": "PLANNER_RESPONSE",
+        "content": "I will compute it.",
+        "tool_calls": [{"name": "run_command", "args": {"CommandLine": cmd_arg}}],
+    }
+    lines = server._entry_to_watch_lines(entry)
+    assert ("narration", "I will compute it.") in lines
+    assert ("command", 'python -c "print(1)"') in lines
+
+
+def test_entry_to_watch_lines_command_falls_back_to_summary():
+    entry = {
+        "source": "MODEL",
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [{"name": "x", "args": {"toolSummary": '"Do the thing"'}}],
+    }
+    assert server._entry_to_watch_lines(entry) == [("command", "Do the thing")]
+
+
+def test_entry_to_watch_lines_run_command_marker_and_skips_non_model():
+    rc = {"source": "MODEL", "type": "RUN_COMMAND", "content": "Output: 1"}
+    assert server._entry_to_watch_lines(rc) == [("result", "command finished")]
+    user = {"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "x"}
+    assert server._entry_to_watch_lines(user) == []
+
+
 def test_progress_stream_pinned_skips_history_then_emits_fresh(brain_dir):
     _write_transcript(
         brain_dir,
@@ -577,7 +622,7 @@ class _FakePopen:
             return None
         return self.returncode
 
-    def communicate(self):
+    def communicate(self, timeout=None):
         return ("", "")
 
     def kill(self):
@@ -646,6 +691,195 @@ def test_run_agy_streamed_nonzero_exit_raises(monkeypatch, brain_dir, last_conv_
         server._run_agy_streamed(
             "hi", "C:\\ws", continue_conv=False, timeout_s=10, on_progress=lambda s, m: None
         )
+
+
+# --------------------------------------------------------------------------
+# watch mode: browser viewer state + _WatchFeed + _run_agy_watched
+# --------------------------------------------------------------------------
+
+
+def test_watch_state_lifecycle():
+    server._watch_reset("my title", 100.0)
+    snap = server._watch_snapshot()
+    assert snap["status"] == "working"
+    assert snap["title"] == "my title"
+    assert snap["events"] == []
+    server._watch_append([{"kind": "command", "text": "ls", "t": 1.0}])
+    assert len(server._watch_snapshot()["events"]) == 1
+    server._watch_finish("done", "the answer", 5.0)
+    snap = server._watch_snapshot()
+    assert snap["status"] == "done"
+    assert snap["answer"] == "the answer"
+    assert snap["elapsed"] == 5.0
+    # snapshot is a copy — mutating it must not affect the shared state
+    snap["events"].append("x")
+    assert len(server._watch_snapshot()["events"]) == 1
+
+
+def test_watch_feed_locks_on_new_conv_and_emits_rich_events(brain_dir):
+    _write_transcript(brain_dir, "old", [_entry("PLANNER_RESPONSE", "OLD")])
+    start = time.time()
+    server._watch_reset("t", start)
+    feed = server._WatchFeed(None, start)  # snapshots {"old"}
+    cmd_arg = '"python -c \\"print(1)\\""'  # double-encoded as agy stores it
+    logs = brain_dir / "new" / ".system_generated" / "logs"
+    logs.mkdir(parents=True)
+    entry = json.dumps(
+        {
+            "source": "MODEL",
+            "type": "PLANNER_RESPONSE",
+            "content": "I will run it.",
+            "tool_calls": [{"name": "run_command", "args": {"CommandLine": cmd_arg}}],
+        }
+    )
+    (logs / "transcript.jsonl").write_text(entry, encoding="utf-8")
+    os.utime(brain_dir / "new", (start + 5, start + 5))
+
+    feed.pump()
+    assert feed.conv == "new"  # locked onto this run's conversation, not 'old'
+    pairs = [(e["kind"], e["text"]) for e in server._watch_snapshot()["events"]]
+    assert ("narration", "I will run it.") in pairs
+    assert ("command", 'python -c "print(1)"') in pairs
+
+
+def test_run_agy_watched_returns_answer_and_populates_state(monkeypatch, brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({"C:\\ws": "wc"}), encoding="utf-8")
+
+    def create_transcript():
+        _write_transcript(brain_dir, "wc", [_entry("PLANNER_RESPONSE", "final watch answer")])
+        os.utime(brain_dir / "wc", (time.time() + 5, time.time() + 5))
+
+    class _CreatingPopen:
+        def __init__(self, *a, **k):
+            self.returncode = 0
+            self._n = 2
+
+        def poll(self):
+            self._n -= 1
+            if self._n == 1:
+                create_transcript()  # the conversation appears once agy "starts"
+            return None if self._n > 0 else self.returncode
+
+        def communicate(self, timeout=None):
+            return ("", "")
+
+        def kill(self):
+            pass
+
+    opened = {}
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: _CreatingPopen())
+    monkeypatch.setattr(server, "_ensure_watch_server", lambda: 12345)  # no real server
+    monkeypatch.setattr(server, "_open_watch_window", lambda url: opened.update(url=url))
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 0.0)
+
+    out = server._run_agy_watched("hi", "C:\\ws", continue_conv=False, timeout_s=10)
+    assert out == "final watch answer"
+    assert opened.get("url", "").startswith("http://127.0.0.1:12345/")
+    snap = server._watch_snapshot()
+    assert snap["status"] == "done"
+    assert snap["answer"] == "final watch answer"
+
+
+def test_run_agy_watched_browser_failure_is_nonfatal(monkeypatch, brain_dir, last_conv_file):
+    # If opening the browser blows up, the run must still complete and return.
+    last_conv_file.write_text(json.dumps({"C:\\ws": "wc"}), encoding="utf-8")
+    _write_transcript(brain_dir, "wc", [_entry("PLANNER_RESPONSE", "answer anyway")])
+    os.utime(brain_dir / "wc", (time.time() + 5, time.time() + 5))
+
+    def boom():
+        raise OSError("no display")
+
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: _FakePopen(polls=0))
+    monkeypatch.setattr(server, "_ensure_watch_server", boom)
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 0.0)
+
+    out = server._run_agy_watched("hi", "C:\\ws", continue_conv=False, timeout_s=10)
+    assert out == "answer anyway"
+
+
+def test_open_watch_window_uses_chromium_app_mode(monkeypatch):
+    monkeypatch.setattr(server, "_chromium_app_browsers", lambda: ["/opt/chrome"])
+    captured = {}
+    monkeypatch.setattr(
+        server.subprocess, "Popen", lambda args, **k: captured.update(args=args) or object()
+    )
+    server._open_watch_window("http://127.0.0.1:9/")
+    assert captured["args"][0] == "/opt/chrome"
+    assert "--app=http://127.0.0.1:9/" in captured["args"]
+    assert any(a.startswith("--window-size=") for a in captured["args"])
+
+
+def test_open_watch_window_falls_back_to_new_window(monkeypatch):
+    monkeypatch.setattr(server, "_chromium_app_browsers", lambda: [])  # no Chromium found
+    opened = {}
+    monkeypatch.setattr(
+        server.webbrowser, "open", lambda url, new=0: opened.update(url=url, new=new)
+    )
+    server._open_watch_window("http://x/")
+    assert opened == {"url": "http://x/", "new": 1}
+
+
+def test_watch_html_substitutes_window_size(monkeypatch):
+    monkeypatch.setattr(server, "_WATCH_WINDOW_SIZE", "480,640")
+    html = server._watch_html()
+    assert "window.resizeTo(480,640)" in html
+    assert "__WIN_W__" not in html and "__WIN_H__" not in html
+
+
+def test_watch_html_bad_size_falls_back_to_default(monkeypatch):
+    monkeypatch.setattr(server, "_WATCH_WINDOW_SIZE", "garbage")
+    html = server._watch_html()
+    assert "window.resizeTo(600,820)" in html
+
+
+def test_watch_reset_clears_image():
+    server._watch_set_image("C:/x/pic.png")
+    assert server._watch_snapshot()["image"] == "C:/x/pic.png"
+    server._watch_reset("t", 1.0)
+    assert server._watch_snapshot()["image"] == ""
+
+
+def test_run_agy_image_watched_shows_image_and_returns(monkeypatch, brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({"C:\\ws": "ic"}), encoding="utf-8")
+
+    def create_transcript():
+        _write_transcript(brain_dir, "ic", [_entry("PLANNER_RESPONSE", "C:/out/art.jpg")])
+        os.utime(brain_dir / "ic", (time.time() + 5, time.time() + 5))
+
+    class _CreatingPopen:
+        def __init__(self, *a, **k):
+            self.returncode = 0
+            self._n = 2
+
+        def poll(self):
+            self._n -= 1
+            if self._n == 1:
+                create_transcript()
+            return None if self._n > 0 else self.returncode
+
+        def communicate(self, timeout=None):
+            return ("", "")
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: _CreatingPopen())
+    monkeypatch.setattr(server, "_ensure_watch_server", lambda: 12345)
+    monkeypatch.setattr(server, "_open_watch_window", lambda url: None)
+    monkeypatch.setattr(
+        server, "_finalize_image", lambda target, txt, start: ("C:/out/art.jpg", "JPEG", 2048)
+    )
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 0.0)
+
+    out = server._run_agy_image_watched(
+        "wrapped prompt", "C:/out/art.png", "C:\\ws", 10, "draw a cat"
+    )
+    assert "C:/out/art.jpg" in out
+    assert "format=JPEG" in out
+    assert server._watch_snapshot()["image"] == "C:/out/art.jpg"
 
 
 # --------------------------------------------------------------------------
