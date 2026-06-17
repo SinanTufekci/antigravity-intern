@@ -75,7 +75,7 @@ tool-calling steps. `antigravity_continue` pins the workspace's **exact** conver
 **Prerequisite (either method):** install agy and sign in to Antigravity **once** (via the IDE or
 `agy -i`) so it has a credential to reuse.
 
-### Recommended — no clone, auto-updating
+### Recommended — no clone, you control updates
 
 With [`uv`](https://docs.astral.sh/uv/) installed, register the bridge straight from
 [PyPI](https://pypi.org/project/antigravity-intern/) under `mcpServers` in `~/.claude.json` — no
@@ -84,13 +84,22 @@ path to hardcode, no `git pull` to remember:
 ```json
 "antigravity-intern": {
   "command": "uvx",
-  "args": ["antigravity-intern@latest"]
+  "args": ["antigravity-intern"]
 }
 ```
 
-The `@latest` suffix matters: it makes uvx fetch the newest published release on each launch (i.e.
-every Claude Code restart). Plain `uvx antigravity-intern` would pin to the first version it cached
-and **not** auto-upgrade. Drop `@latest` if you'd rather pin and upgrade manually.
+uvx pins to the version it first caches and does **not** auto-upgrade, so you never run an update you
+didn't choose — important, since the bridge runs [unsandboxed code](#security): a surprise (or
+compromised) release can't execute until you opt in. When the startup check warns that a newer
+release is out, upgrade deliberately and restart Claude Code:
+
+```bash
+uvx antigravity-intern@latest      # fetch + run the newest release (refreshes uv's cache)
+```
+
+> [!TIP]
+> Prefer hands-off auto-updates? Put `"args": ["antigravity-intern@latest"]` in the config instead —
+> every launch runs the newest release. Convenient, but it pulls new code without asking each time.
 
 ### From source
 
@@ -401,13 +410,14 @@ swarm) that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
 to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
 startup the server warns if your installed agy is newer than the version it was verified against.
 
-**Staying up to date.** A `uvx antigravity-intern@latest` install fetches the newest release on each
-launch (uvx caches by default, so the `@latest` suffix is what keeps it current — plain
-`uvx antigravity-intern` pins to the first-cached version). A `git clone` does not auto-update —
-pull and restart Claude Code. Either way, nothing updates a *running* server; new versions are
-picked up on the next Claude Code restart. To make that visible, on startup the server polls the
-GitHub tags API once and logs a one-line warning to stderr if a newer release tag exists than the
-running code (`__version__` in `server.py`). The check is best-effort — silent when offline or
+**Staying up to date.** Updates are opt-in by design: plain `uvx antigravity-intern` pins to the
+version it first cached, and a `git clone` never auto-updates — so the bridge only ever runs code
+you chose to install (it runs unsandboxed, so this is deliberate, not laziness). Nothing updates a
+*running* server either; new versions take effect on the next Claude Code restart. To surface them,
+on startup the server polls the GitHub tags API once and logs a one-line warning to stderr when a
+newer release tag exists than the running code (`__version__` in `server.py`); upgrade with
+`uvx antigravity-intern@latest` (or `git pull`) and restart. Opt into hands-off auto-updates by
+putting `antigravity-intern@latest` in the config. The check is best-effort — silent when offline or
 rate-limited, never blocks startup. Control it with:
 
 | Env var | Effect |
