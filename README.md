@@ -308,6 +308,14 @@ Personal project, **best-effort maintenance** — issues and PRs welcome, but no
 promises. If `agy -p` ever starts printing to stdout correctly, this whole repo becomes a fun
 historical artefact.
 
+## 🌐 Community & Acknowledgments
+
+- **Qiita (Japan):** A huge thanks to `@fallout` and the Japanese developer community for featuring this project and providing invaluable feedback!
+  - [Detailed Hybrid Setup Guide (Claude Code × Antigravity CLI)](https://qiita.com/fallout/items/5097f0575b58f4c69b81)
+  - [Quick Installation Guide](https://qiita.com/fallout/items/d699df3d6931c07eb38d)
+
+> 💡 **Path Resolution Fix:** Thanks to their community's real-world testing, we identified and resolved a Windows PATH edge case where the MCP server inherits a *stale* `PATH` at startup and can't find `agy`. The `AGY_BIN` environment-variable fallback was implemented directly inspired by their report!
+
 ## License
 
 [MIT](LICENSE). Do whatever you want with it.
