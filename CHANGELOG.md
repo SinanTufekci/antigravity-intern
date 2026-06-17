@@ -10,6 +10,13 @@ summary.
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-06-18
+
+### Changed
+
+- Docs: refreshed the `bridge version` example in the README so the illustrative
+  versions don't imply a stale release is current.
+
 ## [0.10.3] - 2026-06-18
 
 ### Changed
@@ -92,7 +99,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...HEAD
+[0.10.4]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...v0.10.1
