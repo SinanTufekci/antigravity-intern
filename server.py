@@ -1,11 +1,16 @@
 """Antigravity CLI (agy) bridge — fastmcp server.
 
 Exposes Antigravity CLI as MCP tools so Claude Code (or any MCP host) can
-use it as a sub-agent. Solves the headless print-mode bug in agy 1.0.x
-(verified broken through 1.0.1; -p still does not print the answer on 1.0.8)
-by running `agy -p` and reading the response from agy's own transcript files
-instead of relying on stdout. State-file layout and transcript schema
-re-verified on agy 1.0.8.
+use it as a sub-agent. Solves the headless print-mode "stdout bug" in agy
+1.0.x (verified broken through 1.0.9): `agy -p` writes its progress/answer to
+the controlling terminal (TTY/console) directly, NOT to its stdout file
+descriptor — so a captured-stdout read gets nothing. The bridge runs `agy -p`
+and reads the real response from agy's own transcript files instead. It also
+detaches agy from the host's controlling terminal when spawning it (see
+_spawn_kwargs), so that direct-to-terminal output can't leak into the host TUI
+— e.g. straight into Claude Code's prompt input (observed empirically on 1.0.9
+before the fix). State-file layout and transcript schema re-verified on agy
+1.0.9.
 
 Auth: piggybacks on whatever credential store `agy` itself uses on the host
 OS (Windows Credential Manager, macOS Keychain, libsecret on Linux). User
@@ -22,7 +27,7 @@ to wait on an interactive/backend step it never gets headless). So the bridge
 does NOT expose a model parameter — it would hang on any real switch. Change
 the model via agy's settings.json instead.
 
-Compat (re-verified on agy 1.0.8): state-file paths, last_conversations.json,
+Compat (re-verified on agy 1.0.9): state-file paths, last_conversations.json,
 and the transcript schema are unchanged, and a normally-completing -p run still
 writes the JSONL transcript this bridge reads. agy now ALSO dual-writes every
 conversation to a SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db;
@@ -36,7 +41,7 @@ the cwd, so last_conversations.json now updates reliably under cache/.
 SECURITY — read this: `agy -p` runs the model as an autonomous agent that
 auto-executes its tools (read/write files, run shell commands, reach the
 network) with NO approval gate and NO opt-out. Re-verified empirically on
-agy 1.0.8 / Windows that print mode runs out-of-workspace writes even WITHOUT
+agy 1.0.9 / Windows that print mode runs out-of-workspace writes even WITHOUT
 --dangerously-skip-permissions (that flag is a no-op for -p). agy 1.0.5
 integrated a permission system (its logs show toolPermission=request-review),
 but it still does NOT gate print-mode tool execution — -p created a file
@@ -46,12 +51,14 @@ outside the workspace with no prompt.
 --sandbox flag propagation into -p (its 1.0.6 changelog calls this "sandbox
 isolation correctly enforced"), and verified here it now DOES block terminal/
 shell command execution in print mode. But that "isolation" is partial and
-misleadingly named: under --sandbox the model still wrote a file OUTSIDE its
-workspace via the write_to_file tool, and its own permission dump showed
-command(*)/execute_url(*)/read_url(*) all "allowed" — so --sandbox does NOT
-constrain filesystem writes or network egress, only the terminal. Worse for
-us, a --sandbox run that hits a blocked terminal command writes NO JSONL
-transcript (only the SQLite .db), so the bridge would fail to read a response.
+misleadingly named: re-verified on 1.0.9 that under --sandbox the model still
+wrote a file OUTSIDE its workspace via the write_to_file tool — so --sandbox
+does NOT constrain filesystem writes or network egress, only the terminal.
+(agy 1.0.9 hardened the sandbox's command path — stricter exact-match command
+checks, .git added to its dangerous-paths list — but none of that closes the
+out-of-workspace write_to_file hole.) Worse for us, a --sandbox run that hits
+a blocked terminal command writes NO JSONL transcript (only the SQLite .db, as
+re-confirmed on 1.0.9), so the bridge would fail to read a response.
 For both reasons the bridge deliberately does NOT pass --sandbox; there is
 still no agy flag that makes print mode safe.
 
@@ -71,15 +78,23 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from fastmcp import FastMCP
+import anyio
+from fastmcp import Context, FastMCP
 
 mcp = FastMCP("agy")
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
 log = logging.getLogger("agy_bridge")
+
+# The agy executable to invoke. Defaults to "agy" (resolved via PATH); set the
+# AGY_BIN env var to an explicit path when agy isn't reliably on PATH — e.g. on
+# Windows where a new terminal/reboot can drop it:
+#   AGY_BIN=%LOCALAPPDATA%\agy\bin\agy.exe
+# Read once at import; the launching process's environment wins.
+AGY_BIN = os.environ.get("AGY_BIN", "agy")
 
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
@@ -96,13 +111,19 @@ _AGY_LOCK = threading.Lock()
 # Latest agy version the bridge's state-file assumptions were verified against.
 # Newer agy releases may change paths/schemas (the SQLite migration is the known
 # risk), so we warn at startup if the installed agy is newer than this.
-VERIFIED_AGY_VERSION = (1, 0, 8)
+VERIFIED_AGY_VERSION = (1, 0, 9)
 
 # Poll window for the transcript/conversation-id to appear after agy exits.
 # agy has already returned 0 by the time we read, so the common case resolves
 # on the first attempt; the poll just absorbs filesystem-flush lag.
 _RESPONSE_POLL_DEADLINE_S = 5.0
 _RESPONSE_POLL_INTERVAL_S = 0.1
+
+# How often the streaming runner re-reads the transcript to emit progress while
+# agy is still working. agy flushes the transcript in coarse chunks (verified on
+# 1.0.9: it can stay empty for ~15 s then append several entries at once), so
+# progress is deliberately coarse — a handful of ticks per run, not token-level.
+_PROGRESS_POLL_INTERVAL_S = 0.4
 
 
 def _parse_agy_version(text: str) -> Optional[tuple[int, int, int]]:
@@ -140,15 +161,34 @@ def _debug_enabled() -> bool:
     }
 
 
+def _spawn_kwargs() -> dict:
+    """Extra subprocess kwargs that detach agy from the host's controlling terminal.
+
+    agy -p writes its progress/answer to the controlling terminal (TTY/console)
+    directly, NOT to its stdout file descriptor — which is both why capturing
+    stdout yields nothing AND why, when run under an interactive terminal, agy's
+    text leaks into the host (e.g. straight into Claude Code's TUI prompt input).
+    Detaching gives agy no terminal to write to; the bridge still reads the real
+    answer from the transcript file. Verified on agy 1.0.9 / Windows that this
+    does not change what the bridge captures (the response is read from the
+    transcript regardless). Windows: CREATE_NO_WINDOW. POSIX: a new session
+    (no controlling tty).
+    """
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
 def _get_agy_version() -> Optional[str]:
     """Return `agy --version` output, or None if agy can't be run."""
     try:
         proc = subprocess.run(
-            ["agy", "--version"],
+            [AGY_BIN, "--version"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=15,
+            **_spawn_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -252,6 +292,48 @@ def _read_response(conv_id: str) -> str:
         )
     # Last completed planner response is the final answer (tool steps come earlier).
     return chunks[-1]
+
+
+def _transcript_entries(conv_id: str) -> list[dict]:
+    """All parsed JSONL entries for a conversation, or [] if no transcript yet.
+
+    Unlike _read_response this is non-raising and returns every entry (not just
+    the final answer) — it's the live feed the streaming runner polls for
+    progress. Re-reads the whole file each call; transcripts are small (a handful
+    of entries per turn), so that's cheap enough for the poll loop.
+    """
+    transcript = BRAIN_DIR / conv_id / ".system_generated" / "logs" / "transcript.jsonl"
+    if not transcript.exists():
+        return []
+    out: list[dict] = []
+    for line in transcript.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def _entry_to_progress(entry: dict) -> Optional[str]:
+    """One-line human progress string for a transcript entry, or None to skip.
+
+    Only the model's own steps are surfaced: PLANNER_RESPONSE (the narration agy
+    writes as it works — the exact text that used to leak to the host terminal)
+    and RUN_COMMAND (a tool step). USER_INPUT / CONVERSATION_HISTORY / system
+    rows are skipped. The final PLANNER_RESPONSE is also the answer, so callers
+    get the last narration line as a 'finishing' tick — harmless.
+    """
+    if entry.get("source") != "MODEL":
+        return None
+    etype = entry.get("type")
+    content = entry.get("content")
+    if etype == "PLANNER_RESPONSE" and content:
+        return content.strip().splitlines()[0][:160]
+    if etype == "RUN_COMMAND":
+        return "running a command…"
+    return None
 
 
 # Canonical extension per detected image format. Drives extension-correction:
@@ -447,16 +529,20 @@ def _resolve_and_read(pinned_conv: Optional[str], workspace: str, start: float) 
     return _read_response(conv_id)
 
 
-def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -> str:
-    # Note: agy's `-p` mode auto-executes all tools/commands with no approval
-    # gate, so we deliberately do NOT pass --dangerously-skip-permissions (it is
-    # a no-op for -p) or --sandbox. On 1.0.6+ --sandbox blocks only terminal/shell
-    # commands, not write_to_file/FS or network egress, so it is no real boundary;
-    # and a sandbox-blocked terminal run writes no JSONL transcript for us to read.
-    # There is no agy flag that makes print mode safe; see the module docstring's
-    # SECURITY note.
-    args = ["agy", "--print-timeout", f"{timeout_s}s"]
+def _build_agy_args(
+    prompt: str, workspace: str, continue_conv: bool, timeout_s: int
+) -> tuple[list[str], Optional[str]]:
+    """Build agy's argv and resolve the pinned conversation id for continue mode.
 
+    Note: agy's `-p` mode auto-executes all tools/commands with no approval gate,
+    so we deliberately do NOT pass --dangerously-skip-permissions (a no-op for -p)
+    or --sandbox. On 1.0.6+ --sandbox blocks only terminal/shell commands, not
+    write_to_file/FS or network egress, so it is no real boundary; and a
+    sandbox-blocked terminal run writes no JSONL transcript for us to read. There
+    is no agy flag that makes print mode safe; see the module docstring's SECURITY
+    note.
+    """
+    args = [AGY_BIN, "--print-timeout", f"{timeout_s}s"]
     pinned_conv: Optional[str] = None
     if continue_conv:
         # Pin to the exact conversation rooted at this workspace instead of `-c`
@@ -468,6 +554,11 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
         else:
             args.append("-c")
     args.extend(["-p", prompt])
+    return args, pinned_conv
+
+
+def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -> str:
+    args, pinned_conv = _build_agy_args(prompt, workspace, continue_conv, timeout_s)
 
     with _AGY_LOCK:
         start = time.time()
@@ -486,6 +577,7 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
             capture_output=True,
             text=True,
             timeout=timeout_s + 30,
+            **_spawn_kwargs(),  # keep agy's TTY writes out of the host terminal
         )
         log.debug("agy exited %s in %.1fs", proc.returncode, time.time() - start)
         if proc.returncode != 0:
@@ -507,6 +599,128 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
                 # _read_response) is caught here too and surfaces only after the
                 # deadline; that small delay is an accepted tradeoff for keeping
                 # this loop simple.
+                if time.time() >= deadline:
+                    raise
+                time.sleep(_RESPONSE_POLL_INTERVAL_S)
+
+
+def _existing_conv_names() -> set[str]:
+    """Names of brain conversation dirs that exist right now (snapshot)."""
+    if not BRAIN_DIR.exists():
+        return set()
+    return {c.name for c in BRAIN_DIR.iterdir() if c.is_dir()}
+
+
+def _newest_new_conv(start: float, exclude: set[str]) -> Optional[str]:
+    """Newest brain dir touched since `start` whose name is NOT in `exclude`.
+
+    Used to lock streaming onto *this* run's brand-new conversation, ignoring any
+    other recently-finished one — without this, agy's initial blind window (the
+    transcript can stay empty ~15 s) would resolve to a prior conversation and
+    emit its steps as if they were ours.
+    """
+    if not BRAIN_DIR.exists():
+        return None
+    best, best_mtime = None, start - 2
+    for child in BRAIN_DIR.iterdir():
+        if not child.is_dir() or child.name in exclude:
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best, best_mtime = child.name, mtime
+    return best
+
+
+class _ProgressStream:
+    """Emits transcript steps for ONE conversation, each new step exactly once.
+
+    For a continued conversation the id is pinned up front and the cursor starts
+    past the existing history (so prior turns aren't replayed — the same problem
+    agy 1.0.9 fixed for stdout). For a new conversation the id is unknown at
+    launch, so the stream locks onto the first brain dir that appears after launch
+    and didn't pre-exist, and never switches away from it.
+    """
+
+    def __init__(
+        self,
+        pinned_conv: Optional[str],
+        start: float,
+        on_progress: Callable[[int, str], None],
+    ) -> None:
+        self._start = start
+        self._on_progress = on_progress
+        self._pre_existing = set() if pinned_conv else _existing_conv_names()
+        self._conv = pinned_conv
+        self._cursor = len(_transcript_entries(pinned_conv)) if pinned_conv else 0
+
+    def poll(self) -> None:
+        """Read the locked conversation and emit any steps past the cursor."""
+        if self._conv is None:
+            self._conv = _newest_new_conv(self._start, self._pre_existing)
+            if self._conv is None:
+                return
+            self._cursor = 0
+        entries = _transcript_entries(self._conv)
+        for idx, entry in enumerate(entries[self._cursor :], start=self._cursor):
+            msg = _entry_to_progress(entry)
+            if msg:
+                self._on_progress(idx + 1, msg)
+        self._cursor = max(self._cursor, len(entries))
+
+
+def _run_agy_streamed(
+    prompt: str,
+    workspace: str,
+    continue_conv: bool,
+    timeout_s: int,
+    on_progress: Callable[[int, str], None],
+) -> str:
+    """Like _run_agy, but spawn agy non-blocking and stream transcript progress.
+
+    EXPERIMENTAL. Polls the transcript while agy works and calls
+    `on_progress(step, message)` for each new model step. Progress is coarse —
+    agy flushes the transcript in chunks (see _PROGRESS_POLL_INTERVAL_S) — so
+    expect a handful of ticks per run, with an initial blind window, not
+    token-level streaming. The final answer is still read from the transcript
+    exactly as _run_agy does.
+    """
+    args, pinned_conv = _build_agy_args(prompt, workspace, continue_conv, timeout_s)
+
+    with _AGY_LOCK:
+        start = time.time()
+        stream = _ProgressStream(pinned_conv, start, on_progress)
+        log.debug("streaming agy: pinned=%s", pinned_conv)
+        proc = subprocess.Popen(
+            args,
+            cwd=workspace,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **_spawn_kwargs(),  # keep agy's TTY writes out of the host terminal
+        )
+        hard_deadline = start + timeout_s + 30
+        while proc.poll() is None:
+            if time.time() > hard_deadline:
+                proc.kill()
+                raise RuntimeError(f"agy timed out after {timeout_s + 30}s (streaming)")
+            stream.poll()
+            time.sleep(_PROGRESS_POLL_INTERVAL_S)
+
+        # Drain any entries flushed between the last poll and exit.
+        stream.poll()
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"agy exited {proc.returncode}\nstderr: {(stderr or '')[-1000:]}")
+
+        deadline = time.time() + _RESPONSE_POLL_DEADLINE_S
+        while True:
+            try:
+                return _resolve_and_read(pinned_conv, workspace, start)
+            except RuntimeError:
                 if time.time() >= deadline:
                     raise
                 time.sleep(_RESPONSE_POLL_INTERVAL_S)
@@ -548,6 +762,49 @@ def agy_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 
     """
     ws = _normalize_workspace(workspace)
     return _run_agy(prompt, ws, continue_conv=True, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def agy_ask_stream(
+    prompt: str,
+    workspace: Optional[str] = None,
+    timeout_s: int = 180,
+    ctx: Context = None,
+) -> str:
+    """EXPERIMENTAL: like agy_ask, but stream agy's progress while it works.
+
+    Starts a NEW conversation and returns the same final text as agy_ask, but as
+    agy works it reports each intermediate step — its planner narration (the same
+    text that, pre-fix, leaked into the host terminal) and its tool runs — as MCP
+    progress notifications, read live from agy's transcript.
+
+    Progress is intentionally coarse: agy flushes its transcript in chunks, so
+    expect a few ticks per run with an initial blind window, not token-level
+    streaming. Whether you SEE the ticks depends on your MCP client surfacing
+    progress/log notifications; the final return value is identical to agy_ask.
+
+    Args:
+        prompt: Question or instruction for Antigravity.
+        workspace: Working directory for the conversation. Defaults to cwd.
+        timeout_s: Max seconds to wait for agy to complete. Default 180.
+    """
+    ws = _normalize_workspace(workspace)
+
+    def emit(step: int, message: str) -> None:
+        if ctx is None:
+            return
+        # Bridge from this worker thread into the event loop to fire the async
+        # notifications. Best-effort: a progress hiccup must never fail the call.
+        try:
+            anyio.from_thread.run(ctx.report_progress, float(step), None, message)
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            pass
+        try:
+            anyio.from_thread.run(ctx.info, f"agy step {step}: {message}")
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            pass
+
+    return _run_agy_streamed(prompt, ws, continue_conv=False, timeout_s=timeout_s, on_progress=emit)
 
 
 @mcp.tool()

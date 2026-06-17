@@ -9,6 +9,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 
 from server import (  # noqa: E402  (after stdout/stderr rewrap above)
     _detect_image_format,
+    _run_agy_streamed,
     agy_ask,
     agy_continue,
     agy_image,
@@ -47,6 +48,28 @@ def main() -> int:
     final = result.splitlines()[0].strip()
     assert os.path.isfile(final), f"image not found: {final}"
     assert _detect_image_format(final), f"not a recognized image: {final}"
+    print("PASS")
+
+    print("\n=== smoke 4: agy_ask_stream emits live progress ===")
+    ticks = []
+
+    def on_progress(step, message):
+        ticks.append((step, message))
+        print(f"  [progress {step}] {message}")
+
+    t0 = time.time()
+    resp4 = _run_agy_streamed(
+        "Use python to compute 6*7, print it, then reply with ONLY the number.",
+        os.getcwd(),
+        continue_conv=False,
+        timeout_s=180,
+        on_progress=on_progress,
+    )
+    print(f"elapsed: {time.time() - t0:.1f}s")
+    print(f"response ({len(resp4)} chars): {resp4!r}")
+    print(f"progress ticks: {len(ticks)}")
+    assert resp4.strip(), "empty response"
+    assert ticks, "no progress ticks emitted"
     print("PASS")
 
     return 0

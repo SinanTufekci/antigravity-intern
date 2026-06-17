@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
-[![agy 1.0.8 verified](https://img.shields.io/badge/agy-1.0.8%20verified-2ea44f)](https://antigravity.google/)
+[![agy 1.0.9 verified](https://img.shields.io/badge/agy-1.0.9%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 
 </div>
@@ -16,10 +16,12 @@
 ---
 
 `agy`, Google's Antigravity CLI, ships a headless print mode (`agy -p`) that's **broken**: it
-authenticates, talks to the model, gets the answer back… and then never prints it. This bridge
-runs `agy -p` anyway, reads the answer straight out of agy's *own* transcript files, and hands it
-to Claude Code as clean MCP tools. Delegate cheap tool-calling work to Gemini without leaving
-your terminal.
+authenticates, talks to the model, gets the answer back… and then writes it to the *controlling
+terminal* instead of its stdout — so anything capturing stdout gets nothing (and, run under a TUI,
+agy's text leaks straight into the host's prompt). This bridge runs `agy -p` anyway, **detaches it
+from your terminal** so it can't leak, reads the answer straight out of agy's *own* transcript
+files, and hands it to Claude Code as clean MCP tools. Delegate cheap tool-calling work to Gemini
+without leaving your terminal.
 
 > [!WARNING]
 > **This runs unsandboxed code with your privileges.** `agy -p` auto-executes its tools
@@ -47,12 +49,12 @@ flowchart LR
     B -- "agy -p prompt" --> C[Antigravity CLI]
     C -- "Gemini 3.5 Flash (High)" --> M((model))
     M -- "answer" --> C
-    C -. "writes (but never prints)" .-> T[("transcript.jsonl")]
+    C -. "writes (stdout stays empty)" .-> T[("transcript.jsonl")]
     B -- "reads final PLANNER_RESPONSE" --> T
     B -- "plain text" --> A
 ```
 
-`agy -p` persists its real answer — the one it forgets to print — to:
+`agy -p` persists its real answer — the one it never sends to stdout — to:
 
 ```
 ~/.gemini/antigravity-cli/brain/<conv-id>/.system_generated/logs/transcript.jsonl
@@ -103,7 +105,7 @@ using the absolute path to `server.py`:
 </td></tr>
 </table>
 
-Restart Claude Code. Four tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_status`**, and **`mcp__agy__agy_image`**.
+Restart Claude Code. Five tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__agy_continue`**, **`mcp__agy__agy_ask_stream`**, **`mcp__agy__agy_status`**, and **`mcp__agy__agy_image`**.
 
 > *"Use agy_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -115,6 +117,7 @@ Restart Claude Code. Four tools appear: **`mcp__agy__agy_ask`**, **`mcp__agy__ag
 |---|---|
 | `agy_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
 | `agy_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
+| `agy_ask_stream(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `agy_ask`, but emits agy's intermediate steps as MCP **progress notifications** while it works (coarse — see [FAQ](#faq)). |
 | `agy_status()` | Offline setup diagnostics (agy version/compat, state dirs, newest transcript readable). Spends no quota. |
 | `agy_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
 
@@ -148,7 +151,7 @@ format.
 `agy -p` runs the model as an **autonomous agent that auto-executes its own tools** — reading and
 writing files, running shell commands, and reaching the network — with **no approval gate and no
 opt-out**. This isn't a choice the bridge makes; it's how agy's print mode works. Re-verified
-empirically on **agy 1.0.8 / Windows**:
+empirically on **agy 1.0.9 / Windows** (all three checks below still hold):
 
 - Print mode runs out-of-workspace file writes and live network fetches **even without**
   `--dangerously-skip-permissions` — that flag is a **no-op** for `-p`. There is **no** agy flag
@@ -158,11 +161,13 @@ empirically on **agy 1.0.8 / Windows**:
   workspace with no prompt.
 - `--sandbox` is **not** a usable boundary. agy 1.0.6 fixed its propagation into `-p` (the 1.0.6/1.0.7
   changelog calls this "sandbox isolation correctly enforced") and it now **does** block terminal/
-  shell command execution — but verified here that it leaves the `write_to_file` tool and network
-  **wide open**: under `--sandbox` the model still wrote a file *outside* its workspace, and its own
-  permission dump showed `command(*)` / `execute_url(*)` / `read_url(*)` all `allowed`. On top of
-  that, a `--sandbox` run whose blocked terminal command halts it writes **no JSONL transcript**, so
-  the bridge couldn't read a response — so the bridge deliberately never passes `--sandbox`.
+  shell command execution — but re-verified on 1.0.9 that it leaves the `write_to_file` tool and
+  network **wide open**: under `--sandbox` the model still wrote a file *outside* its workspace. agy
+  1.0.9 hardened the sandbox's *command* path (stricter exact-match command checks; `.git` added to
+  its dangerous-paths list), but none of that closes the out-of-workspace `write_to_file` hole. On
+  top of that, a `--sandbox` run whose blocked terminal command halts it writes **no JSONL
+  transcript** (only the SQLite `.db`, re-confirmed on 1.0.9), so the bridge couldn't read a
+  response — so the bridge deliberately never passes `--sandbox`.
 
 **What that means for you:**
 
@@ -190,11 +195,11 @@ apply, and you're responsible for staying within them.
 <summary><b>Will it break when agy updates?</b></summary>
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
-schemas and break it silently. Re-verified working on **1.0.8** (transcript schema and `-p` JSONL
-output unchanged; live smoke test passes). The known future risk is agy's **SQLite (`.db`)
-conversation format** (added in 1.0.4, slated to become the default): agy 1.0.8 already
-**dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db` alongside
-the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
+schemas and break it silently. Re-verified working on **1.0.9** (transcript schema and `-p` JSONL
+output unchanged; live ask/continue/image round-trips pass). The known future risk is agy's
+**SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): agy 1.0.9
+still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
+alongside the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
 known-good `agy` version if you depend on this.
 </details>
 
@@ -213,7 +218,7 @@ would hang on any real switch.
 **Yes — that's the `agy_image` tool.** agy's print mode generates real images on
 your AI Pro quota; `agy_image` drives it, saves the file to a path you choose (or
 a timestamped default in your workspace), fixes the extension to match the real
-bytes (agy picks JPEG or PNG itself), and returns the path. Verified on **agy 1.0.8 / Windows**.
+bytes (agy picks JPEG or PNG itself), and returns the path. Verified on **agy 1.0.9 / Windows**.
 It's request/response only and runs a normal, unsandboxed agy session (see
 [Security](#security)).
 </details>
@@ -228,7 +233,14 @@ amount.
 <details>
 <summary><b>Does it stream responses?</b></summary>
 
-No. `agy -p` is request/response only, so the bridge is too. Each call typically takes 10–30 s.
+The final answer is request/response — `agy -p` returns it all at once, so `agy_ask`/`agy_continue`
+do too (each call typically takes 10–30 s). But there's an **experimental** `agy_ask_stream` that
+reports agy's *intermediate* steps as MCP **progress notifications** while it works, read live from
+agy's transcript. It's deliberately **coarse**: agy flushes its transcript in chunks (observed on
+1.0.9: it can sit empty for ~15 s, then append several steps at once), so you get a handful of
+progress ticks — agy's planner narration and tool runs — not token-by-token streaming. Whether you
+*see* the ticks depends on your MCP client surfacing progress/log notifications; the returned text is
+identical to `agy_ask`.
 </details>
 
 <details>
@@ -241,15 +253,22 @@ requests queue rather than race — plan latency accordingly under load.
 
 ## Status & caveats
 
-- ✅ **Verified on agy 1.0.8** — base dir, `last_conversations.json`, the
+- ✅ **Verified on agy 1.0.9** — base dir, `last_conversations.json`, the
   `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
-  flags are all unchanged; a live smoke test passes all three round-trips (text ask/continue plus
-  image generation). The 1.0.5 `-p` metadata fix also means agy no longer litters the workspace dir.
-- ⏳ **SQLite migration is the real risk** — agy 1.0.8 already dual-writes a `.db` per conversation;
+  flags are all unchanged; live ask/continue/image round-trips all pass. The 1.0.5 `-p` metadata fix
+  also means agy no longer litters the workspace dir.
+- 🖥️ **Console-detach (new)** — agy `-p` writes its progress/answer to the *controlling terminal*,
+  not stdout; under a TUI that text leaks into the host's prompt (seen on 1.0.9 before the fix). The
+  bridge now spawns agy detached from the terminal (`CREATE_NO_WINDOW` / a new POSIX session), so it
+  can't leak; the answer is still read from the transcript.
+- ⏳ **SQLite migration is the real risk** — agy 1.0.9 still dual-writes a `.db` per conversation;
   see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
   ever disappears.
-- 🐛 **Stdout bug** — `-p` still doesn't print the answer on 1.0.8. If a future release fixes
-  stdout, this workaround becomes redundant but harmless.
+- 🐛 **Stdout bug persists** — `-p` still doesn't print the answer to stdout on 1.0.9 (the 1.0.9
+  "print-mode resumption" changelog fix did **not** change this for fresh `-p`). If a future release
+  fixes stdout, this workaround becomes redundant but harmless.
+- 🧪 **Streaming is experimental** — `agy_ask_stream` surfaces coarse progress only; see the
+  [FAQ](#faq).
 - 🔒 **No real sandbox** — agy's `--sandbox` (since 1.0.6) blocks only shell commands in `-p` but still
   leaves file writes and network egress open (and breaks transcript reading), so it's no boundary;
   see [Security](#security).
@@ -257,8 +276,13 @@ requests queue rather than race — plan latency accordingly under load.
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.8**)
+- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.9**)
 - An active Antigravity / AI Pro session
+
+> [!TIP]
+> If `agy` isn't reliably on `PATH` (e.g. a new terminal or reboot drops it on Windows), set the
+> **`AGY_BIN`** env var to its full path and the bridge will use that instead of `"agy"` — e.g.
+> `AGY_BIN=%LOCALAPPDATA%\agy\bin\agy.exe`.
 
 The bridge uses only cross-platform Python (`Path.home()`, `subprocess`) and reads paths under
 `~/.gemini/antigravity-cli/`, which `agy` writes the same way on every OS. **Developed and verified
@@ -283,6 +307,14 @@ startup the server warns if your installed agy is newer than the version it was 
 Personal project, **best-effort maintenance** — issues and PRs welcome, but no uptime/compat
 promises. If `agy -p` ever starts printing to stdout correctly, this whole repo becomes a fun
 historical artefact.
+
+## 🌐 Community & Acknowledgments
+
+- **Qiita (Japan):** A huge thanks to `@fallout` and the Japanese developer community for featuring this project and providing invaluable feedback!
+  - [Detailed Hybrid Setup Guide (Claude Code × Antigravity CLI)](https://qiita.com/fallout/items/5097f0575b58f4c69b81)
+  - [Quick Installation Guide](https://qiita.com/fallout/items/d699df3d6931c07eb38d)
+
+> 💡 **Path Resolution Fix:** Thanks to their community's real-world testing, we identified and resolved a Windows PATH edge case where the MCP server inherits a *stale* `PATH` at startup and can't find `agy`. The `AGY_BIN` environment-variable fallback was implemented directly inspired by their report!
 
 ## License
 

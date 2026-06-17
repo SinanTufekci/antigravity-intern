@@ -224,7 +224,7 @@ def test_compat_warning_warns_for_newer_version():
     msg = server._compat_warning((1, 1, 0))
     assert msg is not None
     assert "1.1.0" in msg  # the detected version
-    assert "1.0.8" in msg  # the verified baseline it's compared to
+    assert "1.0.9" in msg  # the verified baseline it's compared to
 
 
 def test_compat_warning_none_when_version_unknown():
@@ -254,6 +254,55 @@ def test_debug_enabled_false_for_falsy(monkeypatch, value):
 
 
 # --------------------------------------------------------------------------
+# _spawn_kwargs  (console-detach so agy's TTY writes don't leak to the host)
+# --------------------------------------------------------------------------
+
+
+def test_spawn_kwargs_detaches_per_platform(monkeypatch):
+    monkeypatch.setattr(server.os, "name", "nt")
+    nt = server._spawn_kwargs()
+    # CREATE_NO_WINDOW == 0x08000000; reference the literal so the assertion is
+    # portable (the constant only exists on the Windows subprocess module).
+    assert nt == {"creationflags": 0x08000000}
+
+    monkeypatch.setattr(server.os, "name", "posix")
+    posix = server._spawn_kwargs()
+    assert posix == {"start_new_session": True}
+
+
+def test_spawn_kwargs_is_subprocess_run_compatible(monkeypatch):
+    # The returned mapping must be valid **kwargs for subprocess on this host
+    # (no platform-foreign keys leak through).
+    kwargs = server._spawn_kwargs()
+    assert isinstance(kwargs, dict)
+    if server.os.name == "nt":
+        assert "creationflags" in kwargs and "start_new_session" not in kwargs
+    else:
+        assert "start_new_session" in kwargs and "creationflags" not in kwargs
+
+
+# --------------------------------------------------------------------------
+# AGY_BIN  (configurable agy executable; AGY_BIN env var overrides "agy")
+# --------------------------------------------------------------------------
+
+
+def test_build_agy_args_uses_default_agy_bin(monkeypatch):
+    monkeypatch.setattr(server, "AGY_BIN", "agy")
+    args, _ = server._build_agy_args("hi", "C:\\ws", continue_conv=False, timeout_s=10)
+    assert args[0] == "agy"
+
+
+def test_build_agy_args_honors_custom_agy_bin(monkeypatch):
+    custom = "C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"
+    monkeypatch.setattr(server, "AGY_BIN", custom)
+    args, _ = server._build_agy_args("hi", "C:\\ws", continue_conv=False, timeout_s=10)
+    assert args[0] == custom
+    # only argv[0] changes; the rest of the command line is unaffected
+    assert "--print-timeout" in args
+    assert args[-2:] == ["-p", "hi"]
+
+
+# --------------------------------------------------------------------------
 # _startup_checks  (composition of the tested helpers; agy version injected)
 # --------------------------------------------------------------------------
 
@@ -266,7 +315,7 @@ def test_startup_checks_warns_on_newer_agy(monkeypatch, caplog):
 
 
 def test_startup_checks_silent_on_verified_agy(monkeypatch, caplog):
-    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.8")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
     assert caplog.text == ""
@@ -422,6 +471,181 @@ def test_run_agy_args_include_print_timeout_and_prompt(fake_agy, brain_dir, last
     assert "42s" in args
     assert args[-2:] == ["-p", "my-prompt"]
     assert fake_agy["kwargs"]["cwd"] == "C:\\ws"
+
+
+# --------------------------------------------------------------------------
+# streaming: _entry_to_progress / _transcript_entries / _emit_new_progress
+# --------------------------------------------------------------------------
+
+
+def test_entry_to_progress_planner_first_line():
+    e = {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "narrate this\nand more"}
+    assert server._entry_to_progress(e) == "narrate this"
+
+
+def test_entry_to_progress_run_command_label():
+    e = {"source": "MODEL", "type": "RUN_COMMAND", "content": "Created At: ..."}
+    assert server._entry_to_progress(e) == "running a command…"
+
+
+def test_entry_to_progress_skips_user_and_system():
+    user = {"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "x"}
+    system = {"source": "SYSTEM", "type": "CONVERSATION_HISTORY"}
+    assert server._entry_to_progress(user) is None
+    assert server._entry_to_progress(system) is None
+
+
+def test_entry_to_progress_planner_without_content_is_none():
+    assert server._entry_to_progress({"source": "MODEL", "type": "PLANNER_RESPONSE"}) is None
+
+
+def test_transcript_entries_parses_and_skips_malformed(brain_dir):
+    _write_transcript(brain_dir, "te", ["{bad", "", _entry("PLANNER_RESPONSE", "ok")])
+    entries = server._transcript_entries("te")
+    assert len(entries) == 1
+    assert entries[0]["content"] == "ok"
+
+
+def test_transcript_entries_missing_returns_empty(brain_dir):
+    assert server._transcript_entries("nope") == []
+
+
+def test_progress_stream_pinned_skips_history_then_emits_fresh(brain_dir):
+    _write_transcript(
+        brain_dir,
+        "sc",
+        [_entry("PLANNER_RESPONSE", "history a"), _entry("PLANNER_RESPONSE", "history b")],
+    )
+    got = []
+    stream = server._ProgressStream("sc", time.time(), lambda s, m: got.append(m))
+    stream.poll()  # cursor starts past the two history entries
+    assert got == []
+    # a new entry lands for this turn (append to the existing transcript file)
+    transcript = brain_dir / "sc" / ".system_generated" / "logs" / "transcript.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _entry("PLANNER_RESPONSE", "history a"),
+                _entry("PLANNER_RESPONSE", "history b"),
+                _entry("PLANNER_RESPONSE", "fresh"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    stream.poll()
+    assert got == ["fresh"]  # only the post-baseline entry, history not replayed
+
+
+def test_progress_stream_new_conv_locks_on_and_ignores_others(brain_dir):
+    # a prior conversation already exists before the stream starts
+    _write_transcript(brain_dir, "old", [_entry("PLANNER_RESPONSE", "OLD STEP")])
+    start = time.time()
+    got = []
+    stream = server._ProgressStream(None, start, lambda s, m: got.append(m))  # snapshots {"old"}
+    # this run's new conversation appears after launch
+    _write_transcript(
+        brain_dir,
+        "new",
+        [_entry("PLANNER_RESPONSE", "NEW STEP"), _entry("RUN_COMMAND", "Created At: ...")],
+    )
+    os.utime(brain_dir / "new", (start + 5, start + 5))
+    stream.poll()
+    assert got == ["NEW STEP", "running a command…"]  # locked to 'new', 'old' ignored
+
+
+def test_progress_stream_new_conv_emits_nothing_without_new_conv(brain_dir):
+    _write_transcript(brain_dir, "old", [_entry("PLANNER_RESPONSE", "OLD STEP")])
+    got = []
+    stream = server._ProgressStream(None, time.time(), lambda s, m: got.append(m))
+    stream.poll()
+    assert got == []  # no brand-new conversation -> nothing
+
+
+# --------------------------------------------------------------------------
+# streaming: _run_agy_streamed (subprocess.Popen mocked)
+# --------------------------------------------------------------------------
+
+
+class _FakePopen:
+    def __init__(self, *a, polls=1, returncode=0, **k):
+        self._polls = polls
+        self.returncode = returncode
+
+    def poll(self):
+        if self._polls > 0:
+            self._polls -= 1
+            return None
+        return self.returncode
+
+    def communicate(self):
+        return ("", "")
+
+    def kill(self):
+        self.returncode = -9
+
+
+def test_run_agy_streamed_emits_progress_and_returns(monkeypatch, brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({"C:\\ws": "sc"}), encoding="utf-8")
+
+    def create_transcript():
+        # agy "writes" the transcript mid-run; it must appear AFTER the stream
+        # snapshots existing convs, so it's seen as this run's new conversation.
+        _write_transcript(
+            brain_dir,
+            "sc",
+            [
+                _entry("PLANNER_RESPONSE", "step one narration"),
+                _entry("RUN_COMMAND", "Created At: ..."),
+                _entry("PLANNER_RESPONSE", "final answer"),
+            ],
+        )
+        os.utime(brain_dir / "sc", (time.time() + 5, time.time() + 5))
+
+    class _CreatingPopen:
+        def __init__(self, *a, **k):
+            self.returncode = 0
+            self._n = 2
+
+        def poll(self):
+            self._n -= 1
+            if self._n == 1:
+                create_transcript()  # appears during the run
+            return None if self._n > 0 else self.returncode
+
+        def communicate(self):
+            return ("", "")
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: _CreatingPopen())
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_RESPONSE_POLL_DEADLINE_S", 0.0)
+
+    progress = []
+    out = server._run_agy_streamed(
+        "hi",
+        "C:\\ws",
+        continue_conv=False,
+        timeout_s=10,
+        on_progress=lambda step, msg: progress.append(msg),
+    )
+    assert out == "final answer"
+    assert "step one narration" in progress
+    assert "running a command…" in progress
+
+
+def test_run_agy_streamed_nonzero_exit_raises(monkeypatch, brain_dir, last_conv_file):
+    last_conv_file.write_text(json.dumps({"C:\\ws": "sc"}), encoding="utf-8")
+    _write_transcript(brain_dir, "sc", [_entry("PLANNER_RESPONSE", "x")])
+    monkeypatch.setattr(
+        server.subprocess, "Popen", lambda *a, **k: _FakePopen(polls=0, returncode=1)
+    )
+    monkeypatch.setattr(server.time, "sleep", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="agy exited 1"):
+        server._run_agy_streamed(
+            "hi", "C:\\ws", continue_conv=False, timeout_s=10, on_progress=lambda s, m: None
+        )
 
 
 # --------------------------------------------------------------------------
