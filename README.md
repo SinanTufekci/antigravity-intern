@@ -418,7 +418,7 @@ a release two ways, both best-effort GitHub tag checks against the running code 
 `server.py`):
 
 - **In chat — [`antigravity_status`](#tools)** leads with a `bridge version` row, e.g.
-  `v0.10.2 (latest)` or `v0.10.2 -> v0.10.3 available; upgrade: uvx antigravity-intern@latest`. This
+  `v0.10.3 (latest)` or `v0.10.3 -> v0.10.4 available; upgrade: uvx antigravity-intern@latest`. This
   is the notice you actually see in the MCP client's UI (an available update stays `[ok]` — it's
   informational, not a fault).
 - **At startup — stderr**, where the server logs the same one-line warning. This lands in the host's
