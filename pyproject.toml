@@ -1,8 +1,24 @@
 [project]
 name = "agy-mcp-server"
-version = "0.9.0"
+version = "0.10.0"
 description = "MCP server bridging Antigravity CLI (agy) so Claude Code can use it as a sub-agent"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sinan Tüfekçi" }]
+keywords = ["mcp", "claude", "claude-code", "antigravity", "gemini", "agy", "llm", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Utilities",
+]
 dependencies = [
     "fastmcp>=2.0.0",
 ]
@@ -12,6 +28,15 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
 ]
+
+[project.scripts]
+agy-mcp-server = "server:main"
+
+[project.urls]
+Homepage = "https://github.com/SinanTufekci/antigravity-intern"
+Repository = "https://github.com/SinanTufekci/antigravity-intern"
+Issues = "https://github.com/SinanTufekci/antigravity-intern/issues"
+Sponsor = "https://github.com/sponsors/SinanTufekci"
 
 [build-system]
 requires = ["setuptools>=68"]

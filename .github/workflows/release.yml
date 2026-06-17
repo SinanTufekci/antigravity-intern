@@ -1,0 +1,32 @@
+name: Release
+
+# On every version tag, cut a GitHub Release with auto-generated notes (commits
+# /PRs since the previous tag). Runs in parallel with publish.yml, which uploads
+# the same tag to PyPI. Tag a release with:
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+# (keep the tag in sync with pyproject.toml / server.py __version__).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so generated notes can diff from the prior tag
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag

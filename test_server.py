@@ -7,6 +7,7 @@ test_smoke.py instead.
     pytest test_server.py
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -356,6 +357,62 @@ def test_fetch_latest_release_version_none_when_no_semver_tags(monkeypatch):
         server.urllib.request, "urlopen", lambda *a, **k: _FakeResp('[{"name": "latest"}]')
     )
     assert server._fetch_latest_release_version() is None
+
+
+# --------------------------------------------------------------------------
+# _run_with_progress  (threaded agy run + best-effort MCP progress notifications)
+# --------------------------------------------------------------------------
+
+
+def test_run_with_progress_no_ctx_returns_result():
+    # ctx=None (direct call / no progressToken): plain threaded call, no progress.
+    result = asyncio.run(server._run_with_progress(lambda a, b: f"{a}-{b}", ("x", "y"), None, 10))
+    assert result == "x-y"
+
+
+def test_run_with_progress_reports_progress_with_ctx(monkeypatch):
+    monkeypatch.setattr(server, "_PROGRESS_NOTIFY_INTERVAL_S", 0.02)
+
+    class _Ctx:
+        def __init__(self):
+            self.calls = 0
+
+        async def report_progress(self, progress, total=None, message=None):
+            self.calls += 1
+            assert 0 <= progress <= total  # time bar stays within [0, timeout]
+
+    ctx = _Ctx()
+
+    def slow():
+        time.sleep(0.15)  # spans several 0.02s notify intervals
+        return "done"
+
+    result = asyncio.run(server._run_with_progress(slow, (), ctx, 10))
+    assert result == "done"
+    assert ctx.calls >= 1
+
+
+def test_run_with_progress_propagates_worker_errors():
+    def boom():
+        raise RuntimeError("agy failed")
+
+    with pytest.raises(RuntimeError, match="agy failed"):
+        asyncio.run(server._run_with_progress(boom, (), None, 10))
+
+
+def test_run_with_progress_survives_progress_errors(monkeypatch):
+    # A throwing report_progress must not break the run — progress is cosmetic.
+    monkeypatch.setattr(server, "_PROGRESS_NOTIFY_INTERVAL_S", 0.02)
+
+    class _BadCtx:
+        async def report_progress(self, *a, **k):
+            raise RuntimeError("transport down")
+
+    def slow():
+        time.sleep(0.1)
+        return "ok"
+
+    assert asyncio.run(server._run_with_progress(slow, (), _BadCtx(), 10)) == "ok"
 
 
 # --------------------------------------------------------------------------
@@ -1153,7 +1210,9 @@ def test_antigravity_image_happy_path(tmp_path, scratch_dir, monkeypatch):
         return target
 
     monkeypatch.setattr(server, "_run_agy", fake_run)
-    out = server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+    out = asyncio.run(
+        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+    )
     assert str(tmp_path / "art.jpg") in out
     assert "format=JPEG" in out
     assert os.path.isfile(tmp_path / "art.jpg")
@@ -1167,7 +1226,9 @@ def test_antigravity_image_recovers_when_run_agy_raises(tmp_path, scratch_dir, m
         raise RuntimeError("transcript read failed")
 
     monkeypatch.setattr(server, "_run_agy", boom)
-    out = server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+    out = asyncio.run(
+        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+    )
     assert "format=JPEG" in out
 
 
@@ -1179,7 +1240,7 @@ def test_antigravity_image_raises_when_nothing_produced(tmp_path, scratch_dir, m
 
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="no image file found"):
-        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+        asyncio.run(server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path)))
 
 
 def test_antigravity_image_error_mentions_agy_failure(tmp_path, scratch_dir, monkeypatch):
@@ -1190,4 +1251,4 @@ def test_antigravity_image_error_mentions_agy_failure(tmp_path, scratch_dir, mon
 
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="agy also failed"):
-        server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path))
+        asyncio.run(server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path)))

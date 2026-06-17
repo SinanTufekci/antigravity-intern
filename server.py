@@ -69,6 +69,7 @@ the classic prompt-injection "lethal trifecta"). For real isolation, run the
 whole bridge inside a container or VM.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -85,7 +86,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 mcp = FastMCP("antigravity-intern")
 
@@ -93,7 +94,7 @@ mcp = FastMCP("antigravity-intern")
 # installed package metadata, which goes stale on editable installs). Keep in
 # sync with pyproject.toml's version. Compared at startup against the latest
 # tag on GitHub so a long-lived clone learns when to `git pull`.
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -138,6 +139,12 @@ _RESPONSE_POLL_INTERVAL_S = 0.1
 # 1.0.9: it can stay empty for ~15 s then append several entries at once), so
 # progress is deliberately coarse — a handful of ticks per run, not token-level.
 _PROGRESS_POLL_INTERVAL_S = 0.4
+
+# How often to emit an MCP progress notification while a blocking agy run is in
+# flight (see _run_with_progress). agy reports no real percentage, so progress is
+# a coarse time bar (elapsed / timeout); ~1 s keeps clients' bars moving without
+# spamming notifications.
+_PROGRESS_NOTIFY_INTERVAL_S = 1.0
 
 
 def _parse_agy_version(text: str) -> Optional[tuple[int, int, int]]:
@@ -694,6 +701,36 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
                 if time.time() >= deadline:
                     raise
                 time.sleep(_RESPONSE_POLL_INTERVAL_S)
+
+
+async def _run_with_progress(run_fn, args: tuple, ctx: "Optional[Context]", timeout_s: int) -> str:
+    """Run a blocking agy call off the event loop, emitting MCP progress while it works.
+
+    `run_fn(*args)` is the synchronous runner (e.g. _run_agy); it executes in a
+    worker thread so the event loop stays free to send progress. When `ctx` is
+    None — direct/test calls, or a client that sent no progressToken — this is just
+    a threaded call with no notifications. Progress is a coarse time bar
+    (elapsed / timeout_s): agy exposes no real percentage, so a smooth elapsed
+    fraction is the honest approximation. Progress reporting is best-effort and
+    never fails the run.
+    """
+    if ctx is None:
+        return await asyncio.to_thread(run_fn, *args)
+
+    task = asyncio.ensure_future(asyncio.to_thread(run_fn, *args))
+    start = time.monotonic()
+    while not task.done():
+        await asyncio.sleep(_PROGRESS_NOTIFY_INTERVAL_S)
+        elapsed = time.monotonic() - start
+        try:
+            await ctx.report_progress(
+                progress=min(elapsed, float(timeout_s)),
+                total=float(timeout_s),
+                message=f"agy running ({int(elapsed)}s)",
+            )
+        except Exception:  # noqa: BLE001 — progress is cosmetic; never break the run
+            pass
+    return await task  # re-raises any error from the worker thread
 
 
 def _existing_conv_names() -> set[str]:
@@ -1306,8 +1343,20 @@ def _run_agy_image_watched(
         return f"{final_path}\nformat={fmt}  size={size} bytes"
 
 
-@mcp.tool()
-def antigravity_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
+@mcp.tool(
+    annotations={
+        "title": "Ask Antigravity (new conversation)",
+        "readOnlyHint": False,  # agy runs unsandboxed: may write files / run commands
+        "idempotentHint": False,
+        "openWorldHint": True,  # talks to the external Antigravity service
+    }
+)
+async def antigravity_ask(
+    prompt: str,
+    workspace: Optional[str] = None,
+    timeout_s: int = 180,
+    ctx: Optional[Context] = None,
+) -> str:
     """Ask Antigravity (Gemini 3.5 Flash High via agy CLI) a question in a NEW conversation.
 
     Uses your existing AI Pro authentication (silent-auth via Windows Credential
@@ -1324,11 +1373,23 @@ def antigravity_ask(prompt: str, workspace: Optional[str] = None, timeout_s: int
         timeout_s: Max seconds to wait for agy to complete. Default 180.
     """
     ws = _normalize_workspace(workspace)
-    return _run_agy(prompt, ws, continue_conv=False, timeout_s=timeout_s)
+    return await _run_with_progress(_run_agy, (prompt, ws, False, timeout_s), ctx, timeout_s)
 
 
-@mcp.tool()
-def antigravity_continue(prompt: str, workspace: Optional[str] = None, timeout_s: int = 180) -> str:
+@mcp.tool(
+    annotations={
+        "title": "Continue Antigravity conversation",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
+async def antigravity_continue(
+    prompt: str,
+    workspace: Optional[str] = None,
+    timeout_s: int = 180,
+    ctx: Optional[Context] = None,
+) -> str:
     """Continue the Antigravity conversation rooted at this workspace.
 
     Resumes the exact conversation id recorded for `workspace` (via agy's
@@ -1341,10 +1402,17 @@ def antigravity_continue(prompt: str, workspace: Optional[str] = None, timeout_s
         timeout_s: Max seconds to wait for agy to complete. Default 180.
     """
     ws = _normalize_workspace(workspace)
-    return _run_agy(prompt, ws, continue_conv=True, timeout_s=timeout_s)
+    return await _run_with_progress(_run_agy, (prompt, ws, True, timeout_s), ctx, timeout_s)
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Ask Antigravity (live browser watch)",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
 def antigravity_ask_watch(
     prompt: str, workspace: Optional[str] = None, timeout_s: int = 180
 ) -> str:
@@ -1370,12 +1438,20 @@ def antigravity_ask_watch(
     return _run_agy_watched(prompt, ws, continue_conv=False, timeout_s=timeout_s)
 
 
-@mcp.tool()
-def antigravity_image(
+@mcp.tool(
+    annotations={
+        "title": "Generate an image with Antigravity",
+        "readOnlyHint": False,  # writes the generated image file to disk
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
+async def antigravity_image(
     prompt: str,
     output_path: Optional[str] = None,
     workspace: Optional[str] = None,
     timeout_s: int = 240,
+    ctx: Optional[Context] = None,
 ) -> str:
     """Generate an image with Antigravity (Gemini image model via agy CLI).
 
@@ -1406,7 +1482,9 @@ def antigravity_image(
     agy_text: Optional[str] = None
     agy_error: Optional[Exception] = None
     try:
-        agy_text = _run_agy(wrapped, ws, continue_conv=False, timeout_s=timeout_s)
+        agy_text = await _run_with_progress(
+            _run_agy, (wrapped, ws, False, timeout_s), ctx, timeout_s
+        )
     except RuntimeError as e:
         # The transcript read may fail even though agy wrote the image. Don't
         # lose a successfully generated file to a transcript hiccup — try to
@@ -1422,7 +1500,14 @@ def antigravity_image(
     return f"{final_path}\nformat={fmt}  size={size} bytes"
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Generate an image (live browser watch)",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
 def antigravity_image_watch(
     prompt: str,
     output_path: Optional[str] = None,
@@ -1466,7 +1551,14 @@ def _broadcast_workspaces(workspaces: Optional[list], n: int):
     return workspaces
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Run Antigravity prompts in parallel",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
 def antigravity_swarm(
     prompts: list[str],
     workspaces: Optional[list[str]] = None,
@@ -1512,7 +1604,14 @@ def antigravity_swarm(
     return swarm.format_text_results(results)
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Generate several images in parallel",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
 def antigravity_image_swarm(
     prompts: list[str],
     output_paths: Optional[list[str]] = None,
@@ -1557,7 +1656,14 @@ def antigravity_image_swarm(
     return swarm.format_image_results(results)
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "agy bridge diagnostics",
+        "readOnlyHint": True,  # only reads local state + runs `agy --version`
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
 def antigravity_status() -> str:
     """Report offline diagnostics for the agy bridge setup (spends no quota).
 
@@ -1576,7 +1682,16 @@ def antigravity_status() -> str:
     return "\n".join(lines)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry point (also `python server.py`).
+
+    Exposed as the `agy-mcp-server` script so the bridge can be launched with
+    `uvx agy-mcp-server` (isolated, always-latest) instead of a hardcoded path.
+    """
     _configure_logging()
     _startup_checks()
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -6,6 +6,7 @@
 
 **Use Google's [Antigravity](https://antigravity.google/) (Gemini 3.5 Flash) as a sub-agent inside [Claude Code](https://claude.com/claude-code) — for text answers *and* image generation, on the AI Pro quota you already pay for.**
 
+[![CI](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml/badge.svg)](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml)
 [![GitHub release](https://img.shields.io/github/v/release/SinanTufekci/antigravity-intern?color=2ea44f)](https://github.com/SinanTufekci/antigravity-intern/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -107,6 +108,19 @@ using the absolute path to `server.py`:
 
 </td></tr>
 </table>
+
+> [!TIP]
+> **No-clone, auto-updating install (recommended once published to PyPI):** skip the `git clone`
+> and let [`uvx`](https://docs.astral.sh/uv/) pull the latest published release on every launch —
+> no path to hardcode, no `git pull` to remember:
+> ```json
+> "antigravity-intern": {
+>   "command": "uvx",
+>   "args": ["agy-mcp-server"]
+> }
+> ```
+> Each launch runs the newest version in an isolated environment. (The bridge is published to PyPI
+> automatically on every version tag — see [Releasing](#development).)
 
 Restart Claude Code. Eight tools appear: **`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_ask_watch`**, **`antigravity_image`**, **`antigravity_image_watch`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, and **`antigravity_status`** (each prefixed `mcp__antigravity-intern__`).
 
@@ -388,6 +402,19 @@ rate-limited, never blocks startup. Control it with:
 |---|---|
 | `AGY_BRIDGE_NO_UPDATE_CHECK=1` | Skip the GitHub check entirely (fully offline startup). |
 | `AGY_BRIDGE_REPO=owner/name` | Point the check at a fork instead of the upstream repo. |
+
+**Releasing.** Bump the version in **both** `pyproject.toml` and `server.py` (`__version__`), update
+[`CHANGELOG.md`](CHANGELOG.md), then tag:
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+The tag triggers two workflows: `release.yml` cuts a GitHub Release with auto-generated notes, and
+`publish.yml` builds and uploads to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+(no stored token — `publish.yml` verifies the tag matches `pyproject.toml` first). One-time setup:
+register the trusted publisher at `pypi.org/manage/project/agy-mcp-server/settings/publishing/`
+(repo `SinanTufekci/antigravity-intern`, workflow `publish.yml`, environment `pypi`).
 
 ## Contributing
 

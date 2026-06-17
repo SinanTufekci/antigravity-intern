@@ -1,5 +1,6 @@
 """Smoke test: call antigravity_ask directly (no MCP transport) and verify a response."""
 
+import asyncio
 import io
 import sys
 import time
@@ -19,7 +20,9 @@ from server import (  # noqa: E402  (after stdout/stderr rewrap above)
 def main() -> int:
     print("=== smoke 1: antigravity_ask new conversation ===")
     t0 = time.time()
-    resp = antigravity_ask(prompt="Sadece tek bir kelime yaz: 'merhaba'. Başka hiçbir şey yazma.")
+    resp = asyncio.run(
+        antigravity_ask(prompt="Sadece tek bir kelime yaz: 'merhaba'. Başka hiçbir şey yazma.")
+    )
     print(f"elapsed: {time.time() - t0:.1f}s")
     print(f"response ({len(resp)} chars): {resp!r}")
     assert resp.strip(), "empty response"
@@ -27,7 +30,9 @@ def main() -> int:
 
     print("\n=== smoke 2: antigravity_continue same conversation ===")
     t0 = time.time()
-    resp2 = antigravity_continue(prompt="Şimdi tek kelime: 'dünya'. Başka bir şey yazma.")
+    resp2 = asyncio.run(
+        antigravity_continue(prompt="Şimdi tek kelime: 'dünya'. Başka bir şey yazma.")
+    )
     print(f"elapsed: {time.time() - t0:.1f}s")
     print(f"response ({len(resp2)} chars): {resp2!r}")
     assert resp2.strip(), "empty response"
@@ -39,9 +44,11 @@ def main() -> int:
 
     out_path = os.path.join(tempfile.gettempdir(), "agy_smoke_image.png")
     t0 = time.time()
-    result = antigravity_image(
-        prompt="A simple solid blue circle centered on a plain white background.",
-        output_path=out_path,
+    result = asyncio.run(
+        antigravity_image(
+            prompt="A simple solid blue circle centered on a plain white background.",
+            output_path=out_path,
+        )
     )
     print(f"elapsed: {time.time() - t0:.1f}s")
     print(f"result: {result!r}")
