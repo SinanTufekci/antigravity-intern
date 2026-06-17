@@ -16,6 +16,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Stray uv lockfile — this project builds with pip/setuptools, not uv.
+uv.lock
+
 # Local-only superpowers planning/spec docs — keep these out of the public repo.
 docs/superpowers/
 
