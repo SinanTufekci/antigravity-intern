@@ -33,13 +33,23 @@ _GEO = {"x": 40, "y": 60, "w": 400, "h": 320}
 
 
 # ------------------------------------------------------------------- state mutation
-def init(labels: list[str], repos: list[str], start: float) -> None:
+def init(
+    labels: list[str],
+    repos: list[str],
+    start: float,
+    prompts: Optional[list[str]] = None,
+) -> None:
+    """Seed dashboard state. `labels` are the short, single-line row captions;
+    `prompts` (optional) are the full untruncated prompts shown in each worker's
+    detail window. When omitted, the detail window falls back to the label.
+    """
     with _LOCK:
         _STATE["started"] = start
         _STATE["workers"] = [
             {
                 "index": i,
                 "label": labels[i],
+                "prompt": prompts[i] if prompts and i < len(prompts) else labels[i],
                 "repo": repos[i] if i < len(repos) else "",
                 "status": "queued",
                 "elapsed": 0.0,
@@ -218,14 +228,15 @@ header{display:flex;align-items:center;gap:8px;padding:6px 11px;background:#0d0f
 .grid{display:flex;flex-direction:column;flex:1;overflow:auto}
 .pane{flex:1 1 0;min-height:46px;padding:9px 12px;border-bottom:1px solid var(--bd);cursor:pointer;user-select:none;display:flex;flex-direction:column;justify-content:center;gap:5px;overflow:hidden}
 .pane:hover{background:#12151c}
-.r1{display:flex;align-items:center;gap:7px}
+.r1{display:flex;align-items:flex-start;gap:7px}
+.r1 .dot{margin-top:5px}
 .dot{width:7px;height:7px;border-radius:50%;flex:none}
 .queued .dot{background:#556}
 .working .dot{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1s infinite}
 .done .dot{background:var(--cyan)}.error .dot{background:var(--red);box-shadow:0 0 8px var(--red)}
 @keyframes pulse{50%{opacity:.3}}
 .repo{color:#0a0c10;background:var(--green);border-radius:4px;padding:0 5px;font-size:9.5px;font-weight:700;flex:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.prompt{color:#e9eef3;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prompt{color:#e9eef3;font-weight:600;flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-word}
 .st{color:var(--dim);font-size:10.5px;flex:none}
 .pop{color:var(--green);opacity:.55;flex:none;font-size:11px}
 .pane:hover .pop{opacity:1;text-shadow:0 0 7px var(--green)}
@@ -317,8 +328,11 @@ header{display:flex;align-items:center;gap:9px;padding:9px 14px;background:#0d0f
 @keyframes pulse{50%{opacity:.3}}
 .st{margin-left:auto;color:var(--dim);font-size:12px}
 .pbar{padding:9px 15px;border-bottom:1px solid var(--bd);background:#0c0e13;flex:none}
-.plabel{color:var(--green);font-size:9px;letter-spacing:1.5px;font-weight:700;display:block;margin-bottom:4px;opacity:.85}
-.ptext{color:#e9eef3;white-space:pre-wrap;word-break:break-word}
+.plabel{color:var(--green);font-size:9px;letter-spacing:1.5px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:4px;opacity:.85}
+.ptoggle{margin-left:auto;color:var(--dim);cursor:pointer;font-size:9px;letter-spacing:.5px;user-select:none}
+.ptoggle:hover{color:var(--green)}
+.ptext{color:#e9eef3;white-space:pre-wrap;word-break:break-word;cursor:pointer}
+.ptext.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 main{padding:11px 15px;overflow:auto;flex:1}
 .row{display:flex;gap:9px;align-items:baseline;padding:2px 0;animation:sl .2s ease both}
 @keyframes sl{from{opacity:0;transform:translateX(-6px)}}
@@ -336,15 +350,27 @@ main{padding:11px 15px;overflow:auto;flex:1}
 <header id="hd" class="working"><span class="name">Antigravity Intern</span>
 <span class="dot"></span><span class="repo" id="repo" style="display:none"></span>
 <span class="st" id="st"></span></header>
-<div class="pbar"><span class="plabel">PROMPT</span><div class="ptext" id="ptext"></div></div>
+<div class="pbar"><span class="plabel">PROMPT<span class="ptoggle" id="ptoggle" style="display:none">EXPAND ▾</span></span><div class="ptext clamp" id="ptext"></div></div>
 <main><div id="steps"></div><div id="cur"><span class="cur"></span></div><div id="ans"></div></main>
 <script>
 const SYM={narration:"▸",command:"$",result:"✓"};
 const IDX=parseInt(new URLSearchParams(location.search).get("i")||"0",10);
-let started=null,seen=0,fin=false;
+let started=null,seen=0,fin=false,promptText=null;
 const $=id=>document.getElementById(id);
 function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
-function reset(){$("steps").innerHTML="";$("ans").innerHTML="";$("cur").style.display="";seen=0;fin=false;}
+function reset(){$("steps").innerHTML="";$("ans").innerHTML="";$("cur").style.display="";seen=0;fin=false;promptText=null;}
+function applyPrompt(t){
+ if(t===promptText)return;promptText=t;
+ const pt=$("ptext"),tg=$("ptoggle");
+ pt.textContent=t||"";pt.classList.add("clamp");tg.textContent="EXPAND ▾";
+ const of=pt.scrollHeight>pt.clientHeight+1;  // a toggle only helps if the prompt overflows the clamp
+ tg.style.display=of?"":"none";pt.style.cursor=of?"pointer":"default";
+}
+function togglePrompt(){
+ if($("ptoggle").style.display==="none")return;  // short prompt: nothing to expand
+ const clamped=$("ptext").classList.toggle("clamp");
+ $("ptoggle").textContent=clamped?"EXPAND ▾":"COLLAPSE ▴";
+}
 function addStep(e){
  const row=document.createElement("div");row.className="row "+e.kind;
  row.innerHTML="<span class='t'>["+e.t.toFixed(1)+"s]</span><span class='sym'>"+
@@ -366,7 +392,7 @@ async function tick(){
    if(s.started!==started){started=s.started;reset();}
    document.title="Intern · "+(w.repo?w.repo+" · ":"")+(w.label||("Worker "+IDX));
    if(w.repo){$("repo").style.display="";$("repo").textContent=w.repo;}
-   $("ptext").textContent=w.label||"";
+   applyPrompt(w.prompt||w.label||"");
    $("hd").className=w.status;
    $("st").textContent=w.status==="queued"?"queued":
      (w.status==="working"?w.elapsed.toFixed(1)+"s":w.status+" "+w.elapsed.toFixed(1)+"s");
@@ -377,5 +403,6 @@ async function tick(){
  }catch(e){}
  setTimeout(tick,fin?1500:400);
 }
+$("ptext").onclick=togglePrompt;$("ptoggle").onclick=togglePrompt;
 tick();
 </script></body></html>"""

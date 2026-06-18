@@ -216,3 +216,19 @@ def test_watch_state_lifecycle():
     assert snap["workers"][0]["events"][0]["text"] == "ls"
     assert snap["workers"][1]["answer"] == "the answer"
     assert swarm_watch._allowed_images() == {"C:\\img.png"}
+
+
+def test_watch_full_prompt_falls_back_to_label():
+    # Without explicit prompts, the detail-window prompt mirrors the row label.
+    swarm_watch.init(["short label"], ["repo"], 1.0)
+    assert swarm_watch._snapshot()["workers"][0]["prompt"] == "short label"
+
+
+def test_watch_full_prompt_kept_untruncated():
+    # The full prompt is stored verbatim for the detail window even though the
+    # row label is the clipped, single-line caption.
+    full = "Kısaca açıkla: " + "x" * 500
+    swarm_watch.init(["clipped…"], ["repo"], 1.0, [full])
+    w = swarm_watch._snapshot()["workers"][0]
+    assert w["label"] == "clipped…"
+    assert w["prompt"] == full
