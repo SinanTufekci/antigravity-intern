@@ -10,6 +10,24 @@ summary.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** folded the live "watch" view into the single-prompt tools as a
+  `watch` flag instead of separate tools. `antigravity_ask`, `antigravity_continue`
+  and `antigravity_image` now take **`watch=true`** to open the Antigravity Intern
+  browser window — matching `antigravity_swarm`'s existing `watch` flag. This also
+  means **`antigravity_continue` gains watch mode** (it had none before). Tool count
+  drops from eight to six.
+- Swarm dashboard now shows the **full prompt**: dashboard rows wrap to 3 lines
+  (were single-line, ellipsis-clipped), and each worker's detail window shows the
+  complete, untruncated prompt in an **expandable** PROMPT pane (click to expand /
+  collapse). The truncated row caption is unchanged.
+
+### Removed
+
+- **BREAKING:** `antigravity_ask_watch` and `antigravity_image_watch` — superseded
+  by `watch=true` on `antigravity_ask` / `antigravity_image`.
+
 ## [0.10.4] - 2026-06-18
 
 ### Changed

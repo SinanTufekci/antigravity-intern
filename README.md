@@ -140,7 +140,7 @@ Then point Claude Code at the absolute path to `server.py` under `mcpServers` in
 </td></tr>
 </table>
 
-Restart Claude Code. Eight tools appear: **`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_ask_watch`**, **`antigravity_image`**, **`antigravity_image_watch`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, and **`antigravity_status`** (each prefixed `mcp__antigravity-intern__`).
+Restart Claude Code. Six tools appear: **`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_image`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, and **`antigravity_status`** (each prefixed `mcp__antigravity-intern__`). The single-prompt tools take a **`watch=true`** flag to open the live browser view — no separate `*_watch` tool.
 
 > *"Use antigravity_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -150,11 +150,9 @@ Restart Claude Code. Eight tools appear: **`antigravity_ask`**, **`antigravity_c
 
 | Tool | Purpose |
 |---|---|
-| `antigravity_ask(prompt, workspace?, timeout_s?=180)` | Start a **new** Antigravity conversation. |
-| `antigravity_continue(prompt, workspace?, timeout_s?=180)` | Continue the conversation **rooted at `workspace`** (pinned by id). |
-| `antigravity_ask_watch(prompt, workspace?, timeout_s?=180)` | 🧪 **Experimental.** Like `antigravity_ask`, but opens the **Antigravity Intern** live browser window so you can watch agy work (see [Watch mode](#watch-mode)). |
-| `antigravity_image(prompt, output_path?, workspace?, timeout_s?=240)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. |
-| `antigravity_image_watch(prompt, output_path?, workspace?, timeout_s?=240)` | 🧪 **Experimental.** Like `antigravity_image`, but streams progress and **shows the generated image** in the Antigravity Intern window. |
+| `antigravity_ask(prompt, workspace?, timeout_s?=180, watch?=false)` | Start a **new** Antigravity conversation. Pass `watch=true` to open the live browser view (see [Watch mode](#watch-mode)). |
+| `antigravity_continue(prompt, workspace?, timeout_s?=180, watch?=false)` | Continue the conversation **rooted at `workspace`** (pinned by id). `watch=true` opens the live view. |
+| `antigravity_image(prompt, output_path?, workspace?, timeout_s?=240, watch?=false)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. `watch=true` streams progress and **shows the image** inline. |
 | `antigravity_swarm(prompts, workspaces?, max_concurrency?=4, timeout_s?=180, watch?=false)` | Run **several prompts in parallel** as independent agy workers; returns every answer in one block (see [Swarm](#swarm)). |
 | `antigravity_image_swarm(prompts, output_paths?, workspaces?, max_concurrency?=4, timeout_s?=240, watch?=false)` | Generate **several images in parallel** (one worker per prompt). |
 | `antigravity_status()` | Setup diagnostics: **the bridge's own version + whether a newer release is available**, plus agy version/compat, state dirs, and newest-transcript readability. Spends no quota. |
@@ -173,13 +171,13 @@ format.
 
 ## 👁️ Watch mode — Antigravity Intern (experimental)
 
-`antigravity_ask_watch` / `antigravity_image_watch` do the same work as `antigravity_ask` / `antigravity_image`, but
-let you **watch agy work live in a little terminal-style browser window** called
+Pass **`watch=true`** to `antigravity_ask`, `antigravity_continue`, or `antigravity_image`
+to **watch agy work live in a little terminal-style browser window** called
 **Antigravity Intern**. agy still runs headless; alongside it the bridge serves a tiny page on
 `127.0.0.1` and opens it in a small, chromeless app window that streams agy's steps —
 its planner narration (▸), the **real commands** it runs (`$`), and completions (✓) —
 read live from the transcript, with the final answer rendered as Markdown (and, for
-`antigravity_image_watch`, the generated image shown inline).
+`antigravity_image` with `watch=true`, the generated image shown inline).
 
 - **Cross-platform & best-effort.** Prefers a Chromium browser (`--app` mode) for the
   windowed look; falls back to a normal browser window. If nothing can open, the run
@@ -337,11 +335,11 @@ amount.
 <summary><b>Does it stream responses?</b></summary>
 
 The final answer is request/response — `agy -p` returns it all at once, so the tools return when agy
-finishes (each call typically takes 10–30 s). If you want to *watch* agy work as it goes, use the
-experimental **watch mode** (`antigravity_ask_watch` / `antigravity_image_watch`): it opens the
+finishes (each call typically takes 10–30 s). If you want to *watch* agy work as it goes, pass
+**`watch=true`** to `antigravity_ask` / `antigravity_continue` / `antigravity_image`: it opens the
 **Antigravity Intern** browser window and live-streams agy's steps read from the transcript — see
 [Watch mode](#watch-mode). It's coarse (a handful of steps, not token-by-token), and the returned
-value is identical to the non-watch tool.
+value is identical to the non-watch call.
 </details>
 
 <details>
@@ -373,9 +371,9 @@ way to run many agy calls at once.
 - 🐛 **Stdout bug persists** — `-p` still doesn't print the answer to stdout on 1.0.9 (the 1.0.9
   "print-mode resumption" changelog fix did **not** change this for fresh `-p`). If a future release
   fixes stdout, this workaround becomes redundant but harmless.
-- 👁️ **Watch mode is experimental** — `antigravity_ask_watch` / `antigravity_image_watch` open the **Antigravity Intern**
-  browser window to watch agy work live (coarse steps; image shown inline). Best-effort and
-  cross-platform; see [Watch mode](#watch-mode).
+- 👁️ **Watch mode is experimental** — pass `watch=true` to `antigravity_ask` / `antigravity_continue` /
+  `antigravity_image` to open the **Antigravity Intern** browser window and watch agy work live (coarse
+  steps; image shown inline). Best-effort and cross-platform; see [Watch mode](#watch-mode).
 - 🔒 **No real sandbox** — agy's `--sandbox` (since 1.0.6) blocks only shell commands in `-p` but still
   leaves file writes and network egress open (and breaks transcript reading), so it's no boundary;
   see [Security](#security).

@@ -1389,6 +1389,7 @@ async def antigravity_ask(
     prompt: str,
     workspace: Optional[str] = None,
     timeout_s: int = 180,
+    watch: bool = False,
     ctx: Optional[Context] = None,
 ) -> str:
     """Ask Antigravity (Gemini 3.5 Flash High via agy CLI) a question in a NEW conversation.
@@ -1405,8 +1406,15 @@ async def antigravity_ask(
         workspace: Working directory for the conversation. Defaults to cwd.
                    Choose an existing project dir for context-aware responses.
         timeout_s: Max seconds to wait for agy to complete. Default 180.
+        watch: If true, open a live "watch" view in your browser that streams
+               agy's steps (narration + the real commands it runs) as it works.
+               agy still runs headless; the same final text is returned. Best-
+               effort and cross-platform — if the browser can't open, the run
+               completes normally. Default false.
     """
     ws = _normalize_workspace(workspace)
+    if watch:
+        return await asyncio.to_thread(_run_agy_watched, prompt, ws, False, timeout_s)
     return await _run_with_progress(_run_agy, (prompt, ws, False, timeout_s), ctx, timeout_s)
 
 
@@ -1422,6 +1430,7 @@ async def antigravity_continue(
     prompt: str,
     workspace: Optional[str] = None,
     timeout_s: int = 180,
+    watch: bool = False,
     ctx: Optional[Context] = None,
 ) -> str:
     """Continue the Antigravity conversation rooted at this workspace.
@@ -1434,42 +1443,13 @@ async def antigravity_continue(
         prompt: Follow-up message.
         workspace: Working directory used by the prior conversation. Defaults to cwd.
         timeout_s: Max seconds to wait for agy to complete. Default 180.
+        watch: If true, open a live "watch" view in your browser that streams
+               agy's steps as it works (same return value, best-effort). Default false.
     """
     ws = _normalize_workspace(workspace)
+    if watch:
+        return await asyncio.to_thread(_run_agy_watched, prompt, ws, True, timeout_s)
     return await _run_with_progress(_run_agy, (prompt, ws, True, timeout_s), ctx, timeout_s)
-
-
-@mcp.tool(
-    annotations={
-        "title": "Ask Antigravity (live browser watch)",
-        "readOnlyHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True,
-    }
-)
-def antigravity_ask_watch(
-    prompt: str, workspace: Optional[str] = None, timeout_s: int = 180
-) -> str:
-    """EXPERIMENTAL: like antigravity_ask, but open a live "watch" view in your browser.
-
-    Starts a NEW conversation and returns the same final text as antigravity_ask. agy
-    itself runs headless (nothing leaks into your terminal); ALONGSIDE it, the
-    bridge serves a small page on localhost and opens your browser to it, live-
-    streaming agy's steps as it works — its narration and the real commands it runs
-    — read from the transcript. agy's own `-p` console can't show this (it renders
-    only at the end).
-
-    Cross-platform (any browser) and best-effort: if the browser can't open, the
-    run still completes normally. Steps are coarse — the transcript flushes in
-    chunks — not token-level. The page is served on 127.0.0.1 only.
-
-    Args:
-        prompt: Question or instruction for Antigravity.
-        workspace: Working directory for the conversation. Defaults to cwd.
-        timeout_s: Max seconds to wait for agy to complete. Default 180.
-    """
-    ws = _normalize_workspace(workspace)
-    return _run_agy_watched(prompt, ws, continue_conv=False, timeout_s=timeout_s)
 
 
 @mcp.tool(
@@ -1485,6 +1465,7 @@ async def antigravity_image(
     output_path: Optional[str] = None,
     workspace: Optional[str] = None,
     timeout_s: int = 240,
+    watch: bool = False,
     ctx: Optional[Context] = None,
 ) -> str:
     """Generate an image with Antigravity (Gemini image model via agy CLI).
@@ -1506,11 +1487,18 @@ async def antigravity_image(
         workspace: Working directory for the conversation. Defaults to cwd.
         timeout_s: Max seconds to wait for agy to complete. Default 240
                    (image generation is slower than text).
+        watch: If true, open the live "watch" window that streams agy's steps and
+               shows the finished image inline (same return value, best-effort).
+               Default false.
     """
     ws = _normalize_workspace(workspace)
     target = _resolve_output_path(output_path, ws)
     os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
     wrapped = _wrap_image_prompt(prompt, target)
+    if watch:
+        return await asyncio.to_thread(
+            _run_agy_image_watched, wrapped, target, ws, timeout_s, prompt
+        )
 
     start = time.time()
     agy_text: Optional[str] = None
@@ -1532,43 +1520,6 @@ async def antigravity_image(
             raise RuntimeError(f"{fin_err} (agy also failed: {agy_error})") from agy_error
         raise
     return f"{final_path}\nformat={fmt}  size={size} bytes"
-
-
-@mcp.tool(
-    annotations={
-        "title": "Generate an image (live browser watch)",
-        "readOnlyHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True,
-    }
-)
-def antigravity_image_watch(
-    prompt: str,
-    output_path: Optional[str] = None,
-    workspace: Optional[str] = None,
-    timeout_s: int = 240,
-) -> str:
-    """EXPERIMENTAL: like antigravity_image, but stream progress and SHOW the image live.
-
-    Generates an image exactly like antigravity_image (same save path / format-correction /
-    return value), but opens the Antigravity Intern browser window, streams agy's steps as it
-    works, and displays the finished image inline in that window. Best-effort and
-    cross-platform; if the window can't open the image is still generated and
-    returned. Same privileges/caveats as the other tools (see the module SECURITY
-    note).
-
-    Args:
-        prompt: Description of the image to generate.
-        output_path: Where to save. Absolute, or relative to `workspace`. If
-                     omitted, a timestamped name under `workspace` is used.
-        workspace: Working directory for the conversation. Defaults to cwd.
-        timeout_s: Max seconds to wait for agy to complete. Default 240.
-    """
-    ws = _normalize_workspace(workspace)
-    target = _resolve_output_path(output_path, ws)
-    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
-    wrapped = _wrap_image_prompt(prompt, target)
-    return _run_agy_image_watched(wrapped, target, ws, timeout_s, prompt)
 
 
 def _broadcast_workspaces(workspaces: Optional[list], n: int):
