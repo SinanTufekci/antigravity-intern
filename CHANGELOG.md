@@ -10,6 +10,8 @@ summary.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-18
+
 ### Added
 
 - Watch panels overhaul (aesthetics + animation + usability), terminal look kept:
@@ -136,7 +138,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...v0.10.3
