@@ -232,3 +232,18 @@ def test_watch_full_prompt_kept_untruncated():
     w = swarm_watch._snapshot()["workers"][0]
     assert w["label"] == "clipped…"
     assert w["prompt"] == full
+
+
+def test_watch_init_stores_timeout():
+    # The per-worker time progress bar needs the timeout in dashboard state.
+    swarm_watch.init(["p"], ["repo"], 1.0, ["p"], 240)
+    assert swarm_watch._snapshot()["timeout"] == 240
+
+
+def test_dashboard_is_live_reflects_recent_poll(monkeypatch):
+    # No recent /events poll -> not live, so a new swarm run opens a window.
+    monkeypatch.setattr(swarm_watch, "_LAST_POLL", 0.0)
+    assert swarm_watch._dashboard_is_live() is False
+    # A poll within the alive window -> live, so a new run reuses the open dashboard.
+    monkeypatch.setattr(swarm_watch, "_LAST_POLL", swarm_watch.time.time())
+    assert swarm_watch._dashboard_is_live() is True

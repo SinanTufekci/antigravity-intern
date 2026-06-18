@@ -185,9 +185,19 @@ read live from the transcript, with the final answer rendered as Markdown (and, 
 - **Window size.** Set **`AGY_WATCH_WINDOW_SIZE`** (e.g. `AGY_WATCH_WINDOW_SIZE=480,700`)
   to resize the window; default is `560,760`. Press **Enter / Esc** in the window to
   close it.
+- **One window, reused.** Repeated watch calls **reuse the already-open window**
+  instead of stacking a new one each time — the open page resets itself for the new
+  run (the swarm dashboard rebuilds for the new fan-out). If you closed the window, the
+  next run opens a fresh one. Set **`AGY_WATCH_ALWAYS_NEW=1`** to force a new window
+  every time.
+- **Progress, keyboard & copy.** Each panel shows a time progress bar (elapsed /
+  timeout). The swarm dashboard adds an overall done/total bar and per-row time bars;
+  use **↑/↓** to select a worker and **↵** to open its detail window. Answers render
+  as Markdown with a **copy** button, and a "jump to latest" badge appears if you
+  scroll up.
 - **Coarse, not token-level.** agy flushes its transcript in chunks, so you get a
   handful of live steps, not character streaming. The returned value is identical to
-  the non-watch tool. Nothing is sent anywhere but your own machine.
+  the non-watch call. Nothing is sent anywhere but your own machine.
 
 <a id="swarm"></a>
 

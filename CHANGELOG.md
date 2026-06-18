@@ -10,6 +10,23 @@ summary.
 
 ## [Unreleased]
 
+### Added
+
+- Watch panels overhaul (aesthetics + animation + usability), terminal look kept:
+  per-panel time progress bars (elapsed / timeout); the swarm dashboard also gains an
+  overall done/total bar, per-row time bars, and keyboard navigation (↑/↓ select, ↵
+  open); the worker detail window gains the Markdown + typewriter rendering and a copy
+  button from the single-worker viewer; a "jump to latest" follow affordance; and
+  status-glow / completion-pop animations.
+
+### Changed
+
+- Watch windows are now **reused** across repeated runs instead of stacking a new
+  browser window each time watch mode is used — the bridge detects an already-open
+  viewer (via its `/events` polling) and lets it pick up the new run (the page resets
+  itself; the swarm dashboard rebuilds for the new fan-out). Set
+  `AGY_WATCH_ALWAYS_NEW=1` to force a fresh window per run.
+
 ## [0.11.0] - 2026-06-18
 
 ### Changed

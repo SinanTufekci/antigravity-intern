@@ -1300,3 +1300,12 @@ def test_antigravity_image_error_mentions_agy_failure(tmp_path, scratch_dir, mon
     monkeypatch.setattr(server, "_run_agy", boom)
     with pytest.raises(RuntimeError, match="agy also failed"):
         asyncio.run(server.antigravity_image("a cat", output_path=target, workspace=str(tmp_path)))
+
+
+def test_viewer_is_live_reflects_recent_poll(monkeypatch):
+    # No recent /events poll -> not live, so a new watch run opens a window.
+    monkeypatch.setattr(server, "_WATCH_LAST_POLL", 0.0)
+    assert server._viewer_is_live() is False
+    # A poll within the alive window -> live, so a new run reuses the open window.
+    monkeypatch.setattr(server, "_WATCH_LAST_POLL", time.time())
+    assert server._viewer_is_live() is True

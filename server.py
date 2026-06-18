@@ -805,6 +805,7 @@ _WATCH_STATE: dict = {
     "status": "idle",  # idle | working | done | error
     "started": 0.0,
     "elapsed": 0.0,
+    "timeout": 0.0,  # this run's timeout_s, so the page can draw a time progress bar
     "answer": "",
     "image": "",  # absolute path to a generated image to show, or ""
     "events": [],  # list of {kind, text, t}
@@ -812,14 +813,21 @@ _WATCH_STATE: dict = {
 _WATCH_STATE_LOCK = threading.Lock()
 _WATCH_SERVER: Optional[tuple] = None  # (httpd, port, thread) singleton
 
+# An open viewer polls /events a few times a second; we record the last poll so a
+# new run can REUSE an already-open window instead of stacking a fresh one each
+# time watch mode is used (the page resets itself when `started` changes).
+_WATCH_LAST_POLL = 0.0
+_VIEWER_ALIVE_S = 4.0  # a poll within this window means a viewer is still open
 
-def _watch_reset(title: str, start: float) -> None:
+
+def _watch_reset(title: str, start: float, timeout: float = 0.0) -> None:
     with _WATCH_STATE_LOCK:
         _WATCH_STATE.update(
             title=title,
             status="working",
             started=start,
             elapsed=0.0,
+            timeout=timeout,
             answer="",
             image="",
             events=[],
@@ -996,6 +1004,27 @@ main{padding:11px 14px}
  position:fixed;bottom:7px;right:12px;color:#3b414a;font-size:10.5px;
  pointer-events:none;user-select:none;
 }
+.gbar{height:2px;background:#11141a}
+.gfill{
+ height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--cyan));
+ box-shadow:0 0 8px rgba(92,214,230,.5);transition:width .5s linear;
+}
+.dot{animation:pop .45s ease}
+.dot.err{background:var(--red);box-shadow:0 0 8px var(--red)}
+@keyframes pop{0%{transform:scale(.2)}55%{transform:scale(1.5)}100%{transform:scale(1)}}
+.answer{position:relative}
+.copy{
+ position:absolute;top:8px;right:9px;background:#11151c;border:1px solid var(--bd);
+ color:var(--dim);font:inherit;font-size:10.5px;padding:2px 9px;border-radius:5px;
+ cursor:pointer;opacity:.55;transition:opacity .15s,color .15s,border-color .15s;
+}
+.copy:hover{opacity:1;color:var(--green);border-color:#2a3340}
+.jump{
+ position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#12161d;
+ border:1px solid #2a3340;color:var(--cyan);font-size:11.5px;padding:5px 13px;
+ border-radius:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.5);
+ animation:fade .3s;z-index:4;
+}
 </style></head><body>
 <div class="top">
  <header>
@@ -1006,6 +1035,7 @@ main{padding:11px 14px}
    <span id="status">working</span><span id="elapsed"></span>
   </span>
  </header>
+ <div class="gbar"><div class="gfill" id="gfill"></div></div>
  <div class="sub" id="sub" title="click to expand / collapse">
   <span class="chev" id="chev">▾</span><span class="tag">PROMPT</span><span
    class="subtext" id="subtext"></span>
@@ -1016,6 +1046,7 @@ main{padding:11px 14px}
  <div id="live"><span class="cur"></span></div>
  <div id="answerWrap"></div>
 </main>
+<div class="jump" id="jump" style="display:none">↓ jump to latest</div>
 <div class="hint">⏎ / esc · close</div>
 <script>
 try{window.resizeTo(__WIN_W__,__WIN_H__);}catch(e){}
@@ -1023,12 +1054,23 @@ document.addEventListener("keydown",e=>{
  if(e.key==="Enter"||e.key==="Escape"){try{window.close();}catch(_){}}
 });
 const SYM={narration:"▸",command:"$",result:"✓"};
-let seen=0,started=null,finished=false,tq=[],typing=false;
+let seen=0,started=null,finished=false,tq=[],typing=false,follow=true;
 const $=id=>document.getElementById(id);
 $("sub").addEventListener("click",()=>{
  const ex=$("sub").classList.toggle("expanded");$("chev").textContent=ex?"▴":"▾";
 });
 function toBottom(){window.scrollTo(0,document.body.scrollHeight);}
+function maybeBottom(){if(follow)toBottom();}
+window.addEventListener("scroll",()=>{
+ follow=window.innerHeight+window.scrollY>=document.body.scrollHeight-44;
+ $("jump").style.display=follow?"none":"";
+});
+$("jump").addEventListener("click",()=>{follow=true;$("jump").style.display="none";toBottom();});
+function copyText(txt,btn){
+ navigator.clipboard.writeText(txt).then(()=>{
+  const o=btn.textContent;btn.textContent="copied ✓";setTimeout(()=>btn.textContent=o,1200);
+ }).catch(()=>{});
+}
 const FR="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";let fi=0,spinT=null;
 function startSpin(){
  if(spinT)return;
@@ -1037,14 +1079,15 @@ function startSpin(){
 function stopSpin(){if(spinT){clearInterval(spinT);spinT=null;}$("spin").textContent="";}
 function reset(){
  $("steps").innerHTML="";$("answerWrap").innerHTML="";
- $("live").style.display="";$("dot").style.display="none";
+ $("live").style.display="";$("dot").style.display="none";$("dot").className="dot";
+ $("gfill").style.width="0";$("jump").style.display="none";follow=true;
  $("status").textContent="working";seen=0;finished=false;tq=[];typing=false;startSpin();
 }
 function drain(){
  if(!tq.length){typing=false;return;}
  typing=true;const[el,text]=tq.shift();let i=0;
  (function step(){
-  el.textContent=text.slice(0,i++);toBottom();
+  el.textContent=text.slice(0,i++);maybeBottom();
   if(i<=text.length)setTimeout(step,text.length>90?3:9);else drain();
  })();
 }
@@ -1087,6 +1130,9 @@ function md(src){
 }
 function finish(s){
  finished=true;stopSpin();$("live").style.display="none";$("dot").style.display="";
+ if(s.status==="error"){$("dot").classList.add("err");
+  $("gfill").style.background="var(--red)";}
+ $("gfill").style.width="100%";
  const verb=s.status==="error"?"failed":"done";
  $("status").textContent=verb+" in "+(s.elapsed||0).toFixed(1)+"s";
  const w=$("answerWrap");
@@ -1096,13 +1142,16 @@ function finish(s){
  }
  if(s.image){
   const im=document.createElement("img");im.className="shot";
-  im.onload=toBottom;im.src="/image?"+encodeURIComponent(s.image);w.appendChild(im);
+  im.onload=maybeBottom;im.src="/image?"+encodeURIComponent(s.image);w.appendChild(im);
  }
  if(s.answer){
   const a=document.createElement("div");a.className="answer";
-  a.innerHTML=md(s.answer);w.appendChild(a);
+  a.innerHTML=md(s.answer);
+  const cp=document.createElement("button");cp.className="copy";cp.textContent="copy";
+  cp.onclick=()=>copyText(s.answer,cp);a.appendChild(cp);
+  w.appendChild(a);
  }
- toBottom();
+ maybeBottom();
 }
 async function tick(){
  try{
@@ -1110,6 +1159,9 @@ async function tick(){
   if(s.started!==started){started=s.started;reset();}
   $("subtext").textContent=s.title||"";
   $("elapsed").textContent=s.elapsed?s.elapsed.toFixed(1)+"s":"";
+  if(!finished){const to=s.timeout||0;
+   const fr=to>0?Math.min((s.elapsed||0)/to,.98):0.05;
+   $("gfill").style.width=Math.round(fr*100)+"%";}
   for(let i=seen;i<s.events.length;i++)addStep(s.events[i]);
   seen=s.events.length;
   if((s.status==="done"||s.status==="error")&&!finished)finish(s);
@@ -1154,6 +1206,8 @@ def _ensure_watch_server() -> int:
 
         def do_GET(self):  # noqa: N802 (http.server API)
             if self.path.startswith("/events"):
+                global _WATCH_LAST_POLL
+                _WATCH_LAST_POLL = time.time()
                 self._send(json.dumps(_watch_snapshot()).encode("utf-8"), "application/json")
             elif self.path.startswith("/image"):
                 path = _watch_snapshot().get("image") or ""
@@ -1224,10 +1278,23 @@ def _chromium_app_browsers() -> list[str]:
     return found
 
 
+def _viewer_is_live() -> bool:
+    """True if a watch window polled /events within _VIEWER_ALIVE_S — i.e. a viewer
+    is already open, so a new run should reuse it instead of stacking another window."""
+    return (time.time() - _WATCH_LAST_POLL) < _VIEWER_ALIVE_S
+
+
 def _open_watch_window(url: str) -> None:
     """Open the watch page in a small, dedicated window. Prefers a Chromium browser
     in `--app` mode (a sized, chromeless window — not a tab); falls back to a normal
-    new browser window/tab. Best-effort — never raises."""
+    new browser window/tab. Best-effort — never raises.
+
+    Reuses an already-open viewer (detected via recent /events polls) so repeated
+    watch calls don't pile up browser windows; the open page picks up the new run
+    on its own. Set AGY_WATCH_ALWAYS_NEW=1 to force a fresh window every time."""
+    if _viewer_is_live() and not _env_truthy("AGY_WATCH_ALWAYS_NEW"):
+        log.debug("watch viewer already open; reusing it instead of opening a new window")
+        return
     for exe in _chromium_app_browsers():
         try:
             subprocess.Popen(
@@ -1263,7 +1330,7 @@ def _run_agy_watched(prompt: str, workspace: str, continue_conv: bool, timeout_s
         title = prompt.strip().splitlines()[0] if prompt.strip() else ""
         if len(title) > 200:
             title = title[:200].rsplit(" ", 1)[0] + "…"
-        _watch_reset(title, start)
+        _watch_reset(title, start, timeout_s)
         try:
             port = _ensure_watch_server()
             _open_watch_window(f"http://127.0.0.1:{port}/")
@@ -1327,7 +1394,7 @@ def _run_agy_image_watched(
         title = display_prompt.strip().splitlines()[0] if display_prompt.strip() else "image"
         if len(title) > 200:
             title = title[:200].rsplit(" ", 1)[0] + "…"
-        _watch_reset(title, start)
+        _watch_reset(title, start, timeout_s)
         try:
             port = _ensure_watch_server()
             _open_watch_window(f"http://127.0.0.1:{port}/")

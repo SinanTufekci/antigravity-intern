@@ -304,7 +304,7 @@ def swarm_ask(
     if watch:
         import swarm_watch
 
-        swarm_watch.init(_labels(prompts), _repos(ws), time.time(), prompts)
+        swarm_watch.init(_labels(prompts), _repos(ws), time.time(), prompts, timeout_s)
         swarm_watch.open_window(len(prompts))
     results: list[Optional[WorkerResult]] = [None] * len(prompts)
     with ThreadPoolExecutor(max_workers=max(1, max_concurrency)) as ex:
@@ -475,7 +475,7 @@ def swarm_image(
     if watch:
         import swarm_watch
 
-        swarm_watch.init(_labels(prompts), _repos(ws), time.time(), prompts)
+        swarm_watch.init(_labels(prompts), _repos(ws), time.time(), prompts, timeout_s)
         swarm_watch.open_window(len(prompts))
     results: list[Optional[WorkerResult]] = [None] * len(prompts)
     with ThreadPoolExecutor(max_workers=max(1, max_concurrency)) as ex:
