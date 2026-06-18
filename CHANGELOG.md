@@ -10,6 +10,8 @@ summary.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-18
+
 ### Changed
 
 - **BREAKING:** folded the live "watch" view into the single-prompt tools as a
@@ -117,7 +119,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...v0.10.2
