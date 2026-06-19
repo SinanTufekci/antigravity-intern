@@ -10,6 +10,17 @@ summary.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-19
+
+### Changed
+
+- Re-verified state-file paths, `last_conversations.json`, and the `-p` JSONL transcript
+  schema against **agy 1.0.10** (live `antigravity_status` + ask round-trip), and bumped
+  `VERIFIED_AGY_VERSION` so the startup compat check no longer warns on 1.0.10. No functional
+  change: nothing in agy 1.0.10 — bash-mode stdout escaping, PowerShell default shell, the new
+  alert message type, the permission/`settings.json` fixes, or rundll32 browser sign-in — touches
+  the paths, schema, or print-mode TTY-leak the bridge depends on.
+
 ## [0.12.0] - 2026-06-18
 
 ### Added
@@ -138,7 +149,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...v0.10.4

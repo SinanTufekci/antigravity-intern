@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
-[![agy 1.0.9 verified](https://img.shields.io/badge/agy-1.0.9%20verified-2ea44f)](https://antigravity.google/)
+[![agy 1.0.10 verified](https://img.shields.io/badge/agy-1.0.10%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 [![Sponsor](https://img.shields.io/github/sponsors/SinanTufekci?logo=githubsponsors&label=Sponsor&color=ea4aaa)](https://github.com/sponsors/SinanTufekci)
 
@@ -306,10 +306,10 @@ apply, and you're responsible for staying within them.
 <summary><b>Will it break when agy updates?</b></summary>
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
-schemas and break it silently. Re-verified working on **1.0.9** (transcript schema and `-p` JSONL
-output unchanged; live ask/continue/image round-trips pass). The known future risk is agy's
-**SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): agy 1.0.9
-still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
+schemas and break it silently. Re-verified working on **1.0.10** (transcript schema and `-p` JSONL
+output unchanged; live ask round-trip + `antigravity_status` diagnostics pass). The known future risk
+is agy's **SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): agy
+1.0.10 still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
 alongside the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
 known-good `agy` version if you depend on this.
 </details>
@@ -367,15 +367,15 @@ way to run many agy calls at once.
 
 ## Status & caveats
 
-- ✅ **Verified on agy 1.0.9** — base dir, `last_conversations.json`, the
+- ✅ **Verified on agy 1.0.10** — base dir, `last_conversations.json`, the
   `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
-  flags are all unchanged; live ask/continue/image round-trips all pass. The 1.0.5 `-p` metadata fix
-  also means agy no longer litters the workspace dir.
+  flags are all unchanged; a live ask round-trip + `antigravity_status` diagnostics pass. The 1.0.5
+  `-p` metadata fix also means agy no longer litters the workspace dir.
 - 🖥️ **Console-detach (new)** — agy `-p` writes its progress/answer to the *controlling terminal*,
   not stdout; under a TUI that text leaks into the host's prompt (seen on 1.0.9 before the fix). The
   bridge now spawns agy detached from the terminal (`CREATE_NO_WINDOW` / a new POSIX session), so it
   can't leak; the answer is still read from the transcript.
-- ⏳ **SQLite migration is the real risk** — agy 1.0.9 still dual-writes a `.db` per conversation;
+- ⏳ **SQLite migration is the real risk** — agy 1.0.10 still dual-writes a `.db` per conversation;
   see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
   ever disappears.
 - 🐛 **Stdout bug persists** — `-p` still doesn't print the answer to stdout on 1.0.9 (the 1.0.9
@@ -391,7 +391,7 @@ way to run many agy calls at once.
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.9**)
+- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.10**)
 - An active Antigravity / AI Pro session
 
 > [!TIP]

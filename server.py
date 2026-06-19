@@ -10,7 +10,7 @@ detaches agy from the host's controlling terminal when spawning it (see
 _spawn_kwargs), so that direct-to-terminal output can't leak into the host TUI
 — e.g. straight into Claude Code's prompt input (observed empirically on 1.0.9
 before the fix). State-file layout and transcript schema re-verified on agy
-1.0.9.
+1.0.10.
 
 Auth: piggybacks on whatever credential store `agy` itself uses on the host
 OS (Windows Credential Manager, macOS Keychain, libsecret on Linux). User
@@ -27,9 +27,12 @@ to wait on an interactive/backend step it never gets headless). So the bridge
 does NOT expose a model parameter — it would hang on any real switch. Change
 the model via agy's settings.json instead.
 
-Compat (re-verified on agy 1.0.9): state-file paths, last_conversations.json,
+Compat (re-verified on agy 1.0.10): state-file paths, last_conversations.json,
 and the transcript schema are unchanged, and a normally-completing -p run still
-writes the JSONL transcript this bridge reads. agy now ALSO dual-writes every
+writes the JSONL transcript this bridge reads. (Nothing in agy 1.0.10 — bash-mode
+stdout escaping, PowerShell default shell, the new alert message type, permission/
+settings fixes, or rundll32 browser sign-in — touches the paths, schema, or the
+print-mode TTY-leak this bridge depends on.) agy now ALSO dual-writes every
 conversation to a SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db;
 the 1.0.4
 changelog says SQLite "will be the CLI's conversation format", so once JSONL
@@ -94,7 +97,7 @@ mcp = FastMCP("antigravity-intern")
 # installed package metadata, which goes stale on editable installs). Keep in
 # sync with pyproject.toml's version. Compared at startup against the latest
 # tag on GitHub so a long-lived clone learns when to `git pull`.
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -126,7 +129,7 @@ _AGY_LOCK = threading.Lock()
 # Latest agy version the bridge's state-file assumptions were verified against.
 # Newer agy releases may change paths/schemas (the SQLite migration is the known
 # risk), so we warn at startup if the installed agy is newer than this.
-VERIFIED_AGY_VERSION = (1, 0, 9)
+VERIFIED_AGY_VERSION = (1, 0, 10)
 
 # Poll window for the transcript/conversation-id to appear after agy exits.
 # agy has already returned 0 by the time we read, so the common case resolves

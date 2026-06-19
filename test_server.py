@@ -225,7 +225,7 @@ def test_compat_warning_warns_for_newer_version():
     msg = server._compat_warning((1, 1, 0))
     assert msg is not None
     assert "1.1.0" in msg  # the detected version
-    assert "1.0.9" in msg  # the verified baseline it's compared to
+    assert "1.0.10" in msg  # the verified baseline it's compared to
 
 
 def test_compat_warning_none_when_version_unknown():
@@ -526,7 +526,7 @@ def test_startup_checks_warns_on_newer_agy(monkeypatch, caplog):
 
 
 def test_startup_checks_silent_on_verified_agy(monkeypatch, caplog):
-    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.10")
     monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: None)
     caplog.set_level("WARNING", logger="agy_bridge")
     server._startup_checks()
@@ -543,7 +543,7 @@ def test_startup_checks_silent_when_agy_unavailable(monkeypatch, caplog):
 
 def test_startup_checks_warns_on_newer_bridge_release(monkeypatch, caplog):
     # agy is fine; a newer bridge tag exists on GitHub -> update nag fires.
-    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.10")
     monkeypatch.setattr(server, "__version__", "0.8.0")
     monkeypatch.setattr(server, "_fetch_latest_release_version", lambda: (0, 9, 0))
     caplog.set_level("WARNING", logger="agy_bridge")
@@ -553,7 +553,7 @@ def test_startup_checks_warns_on_newer_bridge_release(monkeypatch, caplog):
 
 
 def test_startup_checks_skips_update_check_when_disabled(monkeypatch, caplog):
-    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.9")
+    monkeypatch.setattr(server, "_get_agy_version", lambda: "1.0.10")
     monkeypatch.setenv("AGY_BRIDGE_NO_UPDATE_CHECK", "1")
 
     def _boom():
