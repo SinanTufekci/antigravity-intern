@@ -232,9 +232,7 @@ def mode_swarm(out_path: str) -> None:
     ]
 
     def start_run():
-        return _run_thread(
-            lambda: swarm.swarm_ask(prompts, ws, 3, 150, watch=True)
-        )
+        return _run_thread(lambda: swarm.swarm_ask(prompts, ws, 3, 150, watch=True))
 
     frames = _capture(port, (440, 640), start_run, "swarm")
     _build_gif(frames, out_path, "swarm")
