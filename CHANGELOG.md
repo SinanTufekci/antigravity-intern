@@ -10,6 +10,30 @@ summary.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-23
+
+### Added
+
+- **OpenAI Codex bridge** — drive `codex exec` as a sub-agent alongside Antigravity. Five new tools
+  (in a new `codex_bridge.py` module): `codex_ask`, `codex_continue`, `codex_ask_watch`,
+  `codex_swarm`, `codex_status`. Unlike `agy -p`, `codex exec` writes its final message to a file the
+  bridge requests (`-o/--output-last-message`), so answers are read cleanly with **no
+  transcript-scraping**; continue resumes the exact session via codex's own rollout files
+  (`codex exec resume <id>`, with a cwd-matched on-disk fallback after a restart). Codex's
+  `-s/--sandbox` is a **real** boundary (default `read-only`) and model selection (`-m`) works — both
+  exposed as tool parameters. Verified on **codex-cli 0.141.0**.
+
+### Changed
+
+- **Renamed `antigravity-intern` → `agent-intern`** to reflect that the bridge now drives multiple
+  agent CLIs (Antigravity + Codex), not just Antigravity. The MCP server name — and therefore the
+  tool prefix — becomes `mcp__agent-intern__*`, so **update your client config**. The live viewer is
+  now "Agent Intern" / "Agent Swarm". Backend-specific names are unchanged on purpose: the
+  `antigravity_*` tools, the `AGY_BIN` / `AGY_BRIDGE_*` env vars, and "Antigravity" itself all keep
+  their names.
+- README documents both backends; the header animation now shows two Codex agents (cloud + `>_`)
+  alongside two Antigravity agents.
+
 ## [0.12.1] - 2026-06-19
 
 ### Changed

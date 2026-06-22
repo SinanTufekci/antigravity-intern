@@ -14,8 +14,8 @@ Usage:
     python tools/capture_watch_gif.py image  assets/watch-image.gif
     python tools/capture_watch_gif.py swarm  assets/watch-swarm.gif
 
-Modes capture, respectively: the Antigravity Intern single-panel view (ask),
-the same view with the generated image shown inline (image), and the Antigravity
+Modes capture, respectively: the Agent Intern single-panel view (ask),
+the same view with the generated image shown inline (image), and the Agent
 Swarm dashboard with several workers progressing in parallel (swarm).
 """
 

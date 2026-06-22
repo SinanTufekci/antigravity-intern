@@ -91,13 +91,15 @@ from typing import Optional
 
 from fastmcp import Context, FastMCP
 
-mcp = FastMCP("antigravity-intern")
+import codex_bridge
+
+mcp = FastMCP("agent-intern")
 
 # The running bridge's version — the source of truth is THIS file (not the
 # installed package metadata, which goes stale on editable installs). Keep in
 # sync with pyproject.toml's version. Compared at startup against the latest
 # tag on GitHub so a long-lived clone learns when to `git pull`.
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -112,7 +114,7 @@ AGY_BIN = os.environ.get("AGY_BIN", "agy")
 
 # GitHub repo polled at startup for a newer release tag. Override AGY_BRIDGE_REPO
 # if you run a fork; set AGY_BRIDGE_NO_UPDATE_CHECK=1 to skip the check entirely.
-GITHUB_REPO = os.environ.get("AGY_BRIDGE_REPO", "SinanTufekci/antigravity-intern")
+GITHUB_REPO = os.environ.get("AGY_BRIDGE_REPO", "SinanTufekci/agent-intern")
 
 AGY_DATA = Path.home() / ".gemini" / "antigravity-cli"
 LAST_CONVERSATIONS = AGY_DATA / "cache" / "last_conversations.json"
@@ -197,7 +199,7 @@ def _fetch_latest_release_version() -> Optional[tuple[int, int, int]]:
         url,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "antigravity-intern-bridge",
+            "User-Agent": "agent-intern-bridge",
         },
     )
     try:
@@ -225,7 +227,7 @@ def _update_warning(latest: Optional[tuple[int, int, int]]) -> Optional[str]:
         return None
     newest = ".".join(map(str, latest))
     return (
-        f"A newer Antigravity Intern bridge is available: v{newest} "
+        f"A newer Agent Intern bridge is available: v{newest} "
         f"(you are running v{__version__}). Update with `git pull` in the repo, "
         "then restart Claude Code. Set AGY_BRIDGE_NO_UPDATE_CHECK=1 to silence this."
     )
@@ -597,7 +599,7 @@ def _bridge_version_status() -> tuple[str, bool, str]:
         return (
             label,
             True,
-            f"v{__version__} -> v{newest} available; upgrade: uvx antigravity-intern@latest",
+            f"v{__version__} -> v{newest} available; upgrade: uvx agent-intern@latest",
         )
     return (label, True, f"v{__version__} (latest)")
 
@@ -740,16 +742,19 @@ def _run_agy(prompt: str, workspace: str, continue_conv: bool, timeout_s: int) -
                 time.sleep(_RESPONSE_POLL_INTERVAL_S)
 
 
-async def _run_with_progress(run_fn, args: tuple, ctx: "Optional[Context]", timeout_s: int) -> str:
-    """Run a blocking agy call off the event loop, emitting MCP progress while it works.
+async def _run_with_progress(
+    run_fn, args: tuple, ctx: "Optional[Context]", timeout_s: int, label: str = "agy"
+) -> str:
+    """Run a blocking CLI call off the event loop, emitting MCP progress while it works.
 
-    `run_fn(*args)` is the synchronous runner (e.g. _run_agy); it executes in a
-    worker thread so the event loop stays free to send progress. When `ctx` is
-    None — direct/test calls, or a client that sent no progressToken — this is just
-    a threaded call with no notifications. Progress is a coarse time bar
-    (elapsed / timeout_s): agy exposes no real percentage, so a smooth elapsed
-    fraction is the honest approximation. Progress reporting is best-effort and
-    never fails the run.
+    `run_fn(*args)` is the synchronous runner (e.g. _run_agy or
+    codex_bridge.run_codex); it executes in a worker thread so the event loop stays
+    free to send progress. When `ctx` is None — direct/test calls, or a client that
+    sent no progressToken — this is just a threaded call with no notifications.
+    Progress is a coarse time bar (elapsed / timeout_s): neither CLI exposes a real
+    percentage, so a smooth elapsed fraction is the honest approximation. `label`
+    names the backend in the progress message ("agy" or "codex"). Progress
+    reporting is best-effort and never fails the run.
     """
     if ctx is None:
         return await asyncio.to_thread(run_fn, *args)
@@ -763,7 +768,7 @@ async def _run_with_progress(run_fn, args: tuple, ctx: "Optional[Context]", time
             await ctx.report_progress(
                 progress=min(elapsed, float(timeout_s)),
                 total=float(timeout_s),
-                message=f"agy running ({int(elapsed)}s)",
+                message=f"{label} running ({int(elapsed)}s)",
             )
         except Exception:  # noqa: BLE001 — progress is cosmetic; never break the run
             pass
@@ -812,6 +817,7 @@ _WATCH_STATE: dict = {
     "answer": "",
     "image": "",  # absolute path to a generated image to show, or ""
     "events": [],  # list of {kind, text, t}
+    "backend": "agy",  # which CLI this run drives: "agy" | "codex" (shown in the header)
 }
 _WATCH_STATE_LOCK = threading.Lock()
 _WATCH_SERVER: Optional[tuple] = None  # (httpd, port, thread) singleton
@@ -823,7 +829,7 @@ _WATCH_LAST_POLL = 0.0
 _VIEWER_ALIVE_S = 4.0  # a poll within this window means a viewer is still open
 
 
-def _watch_reset(title: str, start: float, timeout: float = 0.0) -> None:
+def _watch_reset(title: str, start: float, timeout: float = 0.0, backend: str = "agy") -> None:
     with _WATCH_STATE_LOCK:
         _WATCH_STATE.update(
             title=title,
@@ -834,6 +840,7 @@ def _watch_reset(title: str, start: float, timeout: float = 0.0) -> None:
             answer="",
             image="",
             events=[],
+            backend=backend,
         )
 
 
@@ -903,7 +910,7 @@ class _WatchFeed:
 _WATCH_HTML = """<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google" content="notranslate">
-<title>Antigravity Intern — watching agy</title>
+<title>Agent Intern — watching agy</title>
 <style>
 :root{
  --bg:#0a0c10;--fg:#d6d6d6;--dim:#677;--green:#3fdf7f;--cyan:#5cd6e6;
@@ -1031,7 +1038,7 @@ main{padding:11px 14px}
 </style></head><body>
 <div class="top">
  <header>
-  <span class="name">Antigravity Intern</span><span class="wlabel">— watching agy</span>
+  <span class="name">Agent Intern</span><span class="wlabel" id="wlabel">— watching agy</span>
   <span class="pill" id="pill">
    <span class="dot" id="dot" style="display:none"></span>
    <span class="spin" id="spin"></span>
@@ -1161,6 +1168,8 @@ async function tick(){
   const s=await (await fetch("/events",{cache:"no-store"})).json();
   if(s.started!==started){started=s.started;reset();}
   $("subtext").textContent=s.title||"";
+ $("wlabel").textContent="— watching "+(s.backend||"agy");
+ document.title="Agent Intern — watching "+(s.backend||"agy");
   $("elapsed").textContent=s.elapsed?s.elapsed.toFixed(1)+"s":"";
   if(!finished){const to=s.timeout||0;
    const fr=to>0?Math.min((s.elapsed||0)/to,.98):0.05;
@@ -1383,7 +1392,7 @@ def _run_agy_image_watched(
 ) -> str:
     """Generate an image with a live watch window that also displays the result.
 
-    EXPERIMENTAL. Runs agy headless, streams its steps to the Antigravity Intern window,
+    EXPERIMENTAL. Runs agy headless, streams its steps to the Agent Intern window,
     finalises the generated image (extension corrected to the real bytes), shows
     it in the window, and returns the same string as antigravity_image. `display_prompt`
     is the user's original prompt, shown as the window title (not the wrapped
@@ -1644,7 +1653,7 @@ def antigravity_swarm(
         max_concurrency: Max workers running at once (default 4). Higher = faster
                          but more quota/rate-limit pressure and more agents at once.
         timeout_s: Per-worker timeout in seconds. Default 180.
-        watch: If true, open the live "Antigravity Swarm" dashboard window (one row
+        watch: If true, open the live "Agent Swarm" dashboard window (one row
                per worker; click a row to open that agent's full step log beside it).
     """
     import swarm
@@ -1740,11 +1749,269 @@ def antigravity_status() -> str:
     return "\n".join(lines)
 
 
+@mcp.tool(
+    annotations={
+        "title": "Ask Codex (new session)",
+        "readOnlyHint": False,  # codex may edit files when sandbox != read-only
+        "idempotentHint": False,
+        "openWorldHint": True,  # talks to the external OpenAI/Codex service
+    }
+)
+async def codex_ask(
+    prompt: str,
+    workspace: Optional[str] = None,
+    sandbox: str = codex_bridge.DEFAULT_SANDBOX,
+    model: Optional[str] = None,
+    timeout_s: int = 180,
+    ctx: Optional[Context] = None,
+) -> str:
+    """Ask OpenAI Codex (`codex exec`) a question or task in a NEW session.
+
+    Uses your existing Codex login (ChatGPT or API key — see `codex login status`).
+    Returns the agent's final message as text, read from codex's
+    --output-last-message file (no stdout scraping). Codex is a capable coding
+    agent, so this suits heavier reasoning and real code work, not just cheap
+    tool-calling. Point `workspace` at a real project dir for context-aware answers.
+
+    Args:
+        prompt: Question or instruction for Codex.
+        workspace: Working root for the session (`-C`). Defaults to the server cwd.
+        sandbox: Filesystem policy — "read-only" (default: reads and answers but
+                 writes nothing), "workspace-write" (may edit files under the
+                 workspace), or "danger-full-access" (no sandbox — avoid). `codex
+                 exec` has no interactive approval gate, so this is the real safety
+                 boundary; opt into write access deliberately.
+        model: Optional model override (`-m`); omit to use codex's configured default.
+        timeout_s: Max seconds to wait for codex to complete. Default 180.
+    """
+    ws = codex_bridge.normalize_workspace(workspace)
+    codex_bridge.validate_sandbox(sandbox)  # fail fast with a clear message
+    return await _run_with_progress(
+        codex_bridge.run_codex,
+        (prompt, ws, sandbox, model, False, timeout_s),
+        ctx,
+        timeout_s,
+        label="codex",
+    )
+
+
+@mcp.tool(
+    annotations={
+        "title": "Continue Codex session",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
+async def codex_continue(
+    prompt: str,
+    workspace: Optional[str] = None,
+    timeout_s: int = 180,
+    ctx: Optional[Context] = None,
+) -> str:
+    """Continue the Codex session rooted at this workspace (`codex exec resume`).
+
+    Resumes the exact session id captured from the last codex_ask in this
+    workspace, falling back to the newest on-disk session whose recorded cwd
+    matches (so it still works after a server restart). The resumed session keeps
+    its original sandbox and model — those are chosen when you start it with
+    codex_ask.
+
+    Args:
+        prompt: Follow-up message for the existing session.
+        workspace: Working root used by the prior session. Defaults to the server cwd.
+        timeout_s: Max seconds to wait for codex to complete. Default 180.
+    """
+    ws = codex_bridge.normalize_workspace(workspace)
+    return await _run_with_progress(
+        codex_bridge.run_codex,
+        (prompt, ws, codex_bridge.DEFAULT_SANDBOX, None, True, timeout_s),
+        ctx,
+        timeout_s,
+        label="codex",
+    )
+
+
+@mcp.tool(
+    annotations={
+        "title": "Codex bridge diagnostics",
+        "readOnlyHint": True,  # only runs `codex --version` / `codex login status`
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
+def codex_status() -> str:
+    """Report diagnostics for the Codex bridge setup (spends no quota).
+
+    Checks whether codex is on PATH (and its version), whether you're logged in
+    (`codex login status` — no model call, no quota), where codex stores its
+    sessions, and how many workspace sessions are pinned this run. Use this to
+    debug "codex not found" or auth errors before spending quota.
+    """
+    rows = codex_bridge.status_rows()
+    width = max(len(label) for label, _, _ in rows)
+    lines = ["codex bridge status"]
+    for label, ok, detail in rows:
+        mark = "ok" if ok else "!!"
+        lines.append(f"  {label.ljust(width)}  [{mark}] {detail}")
+    lines.append("Overall: " + ("OK" if all(ok for _, ok, _ in rows) else "PROBLEMS FOUND"))
+    return "\n".join(lines)
+
+
+def _codex_event_to_watch_lines(ev: dict) -> list[tuple[str, str]]:
+    """Map one codex --json event to (kind, text) watch lines (kind is
+    'narration' | 'command' | 'result'), mirroring _entry_to_watch_lines for agy.
+    Returns [] for events with nothing worth showing in the viewer.
+    """
+    etype = ev.get("type")
+    if etype == "item.completed":
+        item = ev.get("item") or {}
+        itype = item.get("type")
+        if itype in ("agent_message", "reasoning"):
+            txt = (item.get("text") or item.get("summary") or "").strip()
+            return [("narration", txt.splitlines()[0][:200])] if txt else []
+        if itype == "command_execution":
+            cmd = (item.get("command") or "").strip()
+            return [("command", cmd[:200])] if cmd else []
+        if itype == "file_change":
+            changes = item.get("changes") or item.get("files") or []
+            n = len(changes) if isinstance(changes, list) else 0
+            return [("result", f"file change ({n} file(s))" if n else "file change")]
+        if itype == "mcp_tool_call":
+            return [("command", f"mcp: {item.get('tool') or item.get('name') or ''}"[:200])]
+        if itype == "web_search":
+            return [("command", f"search: {item.get('query') or ''}"[:200])]
+        return []
+    if etype == "turn.started":
+        return [("narration", "thinking…")]
+    if etype == "error":
+        return [("result", f"error: {ev.get('message') or ''}"[:200])]
+    return []
+
+
+def _run_codex_watched(
+    prompt: str,
+    workspace: str,
+    sandbox: str,
+    model: Optional[str],
+    continue_conv: bool,
+    timeout_s: int,
+) -> str:
+    """Like codex_bridge.run_codex, but stream codex's steps to the live watch
+    window. EXPERIMENTAL. Reuses the same localhost viewer as the agy watch tools;
+    the return value is identical to codex_ask.
+    """
+    start = time.time()
+    title = prompt.strip().splitlines()[0] if prompt.strip() else ""
+    if len(title) > 200:
+        title = title[:200].rsplit(" ", 1)[0] + "…"
+    _watch_reset(title, start, timeout_s, backend="codex")
+    try:
+        port = _ensure_watch_server()
+        _open_watch_window(f"http://127.0.0.1:{port}/")
+    except Exception:  # noqa: BLE001 — the viewer is best-effort, never fatal
+        pass
+
+    def on_event(ev: dict) -> None:
+        watch_lines = _codex_event_to_watch_lines(ev)
+        if watch_lines:
+            t = round(time.time() - start, 1)
+            _watch_append([{"kind": k, "text": x, "t": t} for k, x in watch_lines])
+
+    try:
+        answer = codex_bridge.run_codex_streaming(
+            prompt, workspace, sandbox, model, continue_conv, timeout_s, on_event
+        )
+    except Exception as e:  # noqa: BLE001 — show the failure in the window, then re-raise
+        _watch_finish("error", f"({e})"[:200], time.time() - start)
+        raise
+    _watch_finish("done", answer, time.time() - start)
+    return answer
+
+
+@mcp.tool(
+    annotations={
+        "title": "Ask Codex (live browser watch)",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
+def codex_ask_watch(
+    prompt: str,
+    workspace: Optional[str] = None,
+    sandbox: str = codex_bridge.DEFAULT_SANDBOX,
+    model: Optional[str] = None,
+    timeout_s: int = 180,
+) -> str:
+    """EXPERIMENTAL: like codex_ask, but open a live "watch" window in your browser.
+
+    Starts a NEW codex session and returns the same final text as codex_ask. codex
+    runs headless; alongside it the bridge serves a small localhost page and opens
+    your browser to it, live-streaming codex's steps (reasoning, the commands it
+    runs, file changes) read from codex's own --json event stream. Same viewer as
+    the agy watch tools. Best-effort and cross-platform: if the browser can't open,
+    the run still completes normally.
+
+    Args:
+        prompt: Question or instruction for Codex.
+        workspace: Working root for the session. Defaults to the server cwd.
+        sandbox: Filesystem policy (read-only default; see codex_ask for the options).
+        model: Optional model override (`-m`); omit for codex's configured default.
+        timeout_s: Max seconds to wait for codex to complete. Default 180.
+    """
+    ws = codex_bridge.normalize_workspace(workspace)
+    codex_bridge.validate_sandbox(sandbox)
+    return _run_codex_watched(prompt, ws, sandbox, model, False, timeout_s)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Codex swarm (parallel sessions)",
+        "readOnlyHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+)
+def codex_swarm(
+    prompts: list[str],
+    workspaces: Optional[list[str]] = None,
+    sandbox: str = codex_bridge.DEFAULT_SANDBOX,
+    model: Optional[str] = None,
+    max_concurrency: int = 4,
+    timeout_s: int = 180,
+) -> str:
+    """Run SEVERAL Codex prompts IN PARALLEL as independent one-shot workers.
+
+    Good for independent sub-tasks — answer N questions, summarise N files/repos —
+    without paying for them serially. Each worker is a fresh `codex exec` with its
+    own output file, so they don't race (codex needs no isolated HOME, unlike the
+    agy swarm). Returns every worker's result in one block; a worker that fails is
+    reported in place while the others still return. Workers are one-shot: there is
+    no codex_continue for a swarm worker's session.
+
+    Args:
+        prompts: One prompt per parallel worker.
+        workspaces: Working root per worker — omit for the server cwd, pass a
+                    1-item list to point every worker at the same dir, or one entry
+                    per prompt for per-worker dirs.
+        sandbox: Filesystem policy for all workers (read-only default; see codex_ask).
+        model: Optional model override (`-m`) applied to all workers.
+        max_concurrency: Max workers running at once (default 4).
+        timeout_s: Per-worker timeout in seconds. Default 180.
+    """
+    codex_bridge.validate_sandbox(sandbox)
+    results = codex_bridge.swarm_codex(
+        prompts, workspaces, sandbox, model, max_concurrency, timeout_s
+    )
+    return codex_bridge.format_swarm_results(results)
+
+
 def main() -> None:
     """Console entry point (also `python server.py`).
 
-    Exposed as the `antigravity-intern` script so the bridge can be launched with
-    `uvx antigravity-intern` (isolated, always-latest) instead of a hardcoded path.
+    Exposed as the `agent-intern` script so the bridge can be launched with
+    `uvx agent-intern` (isolated, always-latest) instead of a hardcoded path.
     """
     _configure_logging()
     _startup_checks()

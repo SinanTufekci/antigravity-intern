@@ -26,7 +26,7 @@ from typing import Optional
 
 from server import _chromium_app_browsers, _detect_image_format, _env_truthy
 
-_STATE: dict = {"title": "Antigravity Swarm", "started": 0.0, "timeout": 0.0, "workers": []}
+_STATE: dict = {"title": "Agent Swarm", "started": 0.0, "timeout": 0.0, "workers": []}
 _LOCK = threading.Lock()
 _SERVER: Optional[tuple] = None  # (httpd, port)
 _CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -245,7 +245,7 @@ def open_worker_window(index: int) -> None:
 # and opens that agent's detail window (full steps) beside the dashboard.
 _HTML = """<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Antigravity Swarm</title><style>
+<title>Agent Swarm</title><style>
 :root{--bg:#0a0c10;--fg:#d6d6d6;--dim:#6a7480;--green:#3fdf7f;--cyan:#5cd6e6;--red:#ff6b6b;--bd:#191c22}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg)}
 body{color:var(--fg);font:12px/1.5 ui-monospace,"Cascadia Mono",Consolas,monospace;display:flex;flex-direction:column;height:100vh}
@@ -292,7 +292,7 @@ header{display:flex;align-items:center;gap:9px;padding:7px 11px;background:#0d0f
 @keyframes flow{from{background-position:200% 0}to{background-position:0 0}}
 .foot{flex:none;padding:4px 11px;border-top:1px solid var(--bd);color:#3b414a;font-size:10px;background:#0d0f14;text-align:center}
 </style></head><body>
-<header><span class="name">Antigravity Swarm</span><span class="clock" id="clock"></span><span id="tot"></span></header>
+<header><span class="name">Agent Swarm</span><span class="clock" id="clock"></span><span id="tot"></span></header>
 <div class="gbar"><div class="gfill" id="gfill"></div></div>
 <div class="grid" id="grid"></div>
 <div class="foot">↑/↓ select · ↵ open · click a row for its full log</div>
@@ -384,7 +384,7 @@ tick();
 # button). Mirrors the single-worker viewer in server.py.
 _WORKER_HTML = """<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Antigravity Intern</title><style>
+<title>Agent Intern</title><style>
 :root{--bg:#0a0c10;--fg:#d6d6d6;--dim:#6a7480;--green:#3fdf7f;--cyan:#5cd6e6;--red:#ff6b6b;--bd:#191c22;--code:#06080b}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg)}
 body{color:var(--fg);font:13px/1.6 ui-monospace,"Cascadia Mono",Consolas,monospace;display:flex;flex-direction:column;height:100vh}
@@ -435,7 +435,7 @@ main{padding:11px 15px;overflow:auto;flex:1}
 .shot{max-width:100%;border:1px solid var(--bd);border-radius:8px;margin-top:11px;display:block;animation:fd .4s}
 .jump{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);background:#12161d;border:1px solid #2a3340;color:var(--cyan);font-size:11px;padding:5px 13px;border-radius:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.5);animation:fd .3s}
 </style></head><body>
-<header id="hd" class="working"><span class="name">Antigravity Intern</span>
+<header id="hd" class="working"><span class="name">Agent Intern</span>
 <span class="dot"></span><span class="repo" id="repo" style="display:none"></span>
 <span class="st" id="st"></span></header>
 <div class="gbar"><div class="gfill" id="gfill"></div></div>

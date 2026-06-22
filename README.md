@@ -1,17 +1,17 @@
 <div align="center">
 
-# Claude Code × Antigravity CLI — MCP Bridge
+# Claude Code × Antigravity CLI + OpenAI Codex — MCP Bridge
 
-<img src="assets/bridge-animation.svg" width="100%" alt="Claude Code x Antigravity CLI Bridge Animation" />
+<img src="assets/bridge-animation.svg" width="100%" alt="Claude Code bridging Antigravity CLI and OpenAI Codex" />
 
-**Use Google's [Antigravity](https://antigravity.google/) (Gemini 3.5 Flash) as a sub-agent inside [Claude Code](https://claude.com/claude-code) — for text answers *and* image generation, on the AI Pro quota you already pay for.**
+**Drive Google's [Antigravity](https://antigravity.google/) (Gemini 3.5 Flash) *and* [OpenAI Codex](https://developers.openai.com/codex/) as sub-agents inside [Claude Code](https://claude.com/claude-code) — text answers, image generation, and real coding work, on quota you already pay for.**
 
-[![CI](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml/badge.svg)](https://github.com/SinanTufekci/antigravity-intern/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/antigravity-intern?logo=pypi&logoColor=white&color=2ea44f)](https://pypi.org/project/antigravity-intern/)
+[![CI](https://github.com/SinanTufekci/agent-intern/actions/workflows/ci.yml/badge.svg)](https://github.com/SinanTufekci/agent-intern/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-intern?logo=pypi&logoColor=white&color=2ea44f)](https://pypi.org/project/agent-intern/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
-[![Glama](https://glama.ai/mcp/servers/SinanTufekci/antigravity-intern/badges/score.svg)](https://glama.ai/mcp/servers/SinanTufekci/antigravity-intern)
+[![Glama](https://glama.ai/mcp/servers/SinanTufekci/agent-intern/badges/score.svg)](https://glama.ai/mcp/servers/SinanTufekci/agent-intern)
 [![agy 1.0.10 verified](https://img.shields.io/badge/agy-1.0.10%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 [![Sponsor](https://img.shields.io/github/sponsors/SinanTufekci?logo=githubsponsors&label=Sponsor&color=ea4aaa)](https://github.com/sponsors/SinanTufekci)
@@ -35,6 +35,13 @@ without leaving your terminal.
 > network egress stay wide open — so it's no real boundary. The `workspace` argument is a
 > *starting context*, **not** a security boundary. Only use it with **trusted prompts on trusted
 > content**; for real isolation, run the bridge inside a container or VM. **[Full details →](#security)**
+
+> [!NOTE]
+> **Now with OpenAI Codex too.** The same bridge exposes `codex_ask` / `codex_continue` /
+> `codex_ask_watch` / `codex_swarm` / `codex_status`, driving OpenAI's `codex exec` on your existing
+> Codex login. Codex is the *well-behaved* sibling: it writes its answer straight to a file the bridge
+> requests (no transcript-scraping), supports model selection, and has a **real** sandbox. See
+> [Codex bridge](#codex-bridge).
 
 ## Why you'd want this
 
@@ -79,13 +86,13 @@ tool-calling steps. `antigravity_continue` pins the workspace's **exact** conver
 ### Recommended — no clone, you control updates
 
 With [`uv`](https://docs.astral.sh/uv/) installed, register the bridge straight from
-[PyPI](https://pypi.org/project/antigravity-intern/) under `mcpServers` in `~/.claude.json` — no
+[PyPI](https://pypi.org/project/agent-intern/) under `mcpServers` in `~/.claude.json` — no
 path to hardcode, no `git pull` to remember:
 
 ```json
-"antigravity-intern": {
+"agent-intern": {
   "command": "uvx",
-  "args": ["antigravity-intern"]
+  "args": ["agent-intern"]
 }
 ```
 
@@ -95,11 +102,11 @@ compromised) release can't execute until you opt in. When the startup check warn
 release is out, upgrade deliberately and restart Claude Code:
 
 ```bash
-uvx antigravity-intern@latest      # fetch + run the newest release (refreshes uv's cache)
+uvx agent-intern@latest      # fetch + run the newest release (refreshes uv's cache)
 ```
 
 > [!TIP]
-> Prefer hands-off auto-updates? Put `"args": ["antigravity-intern@latest"]` in the config instead —
+> Prefer hands-off auto-updates? Put `"args": ["agent-intern@latest"]` in the config instead —
 > every launch runs the newest release. Convenient, but it pulls new code without asking each time.
 
 ### From source
@@ -107,8 +114,8 @@ uvx antigravity-intern@latest      # fetch + run the newest release (refreshes u
 Clone it instead if you want to hack on the bridge or pin a local copy:
 
 ```bash
-git clone https://github.com/SinanTufekci/antigravity-intern.git
-cd antigravity-intern
+git clone https://github.com/SinanTufekci/agent-intern.git
+cd agent-intern
 pip install fastmcp
 python test_smoke.py        # 3 real round-trips (ask, continue, image) — should print three PASS lines
 ```
@@ -123,7 +130,7 @@ Then point Claude Code at the absolute path to `server.py` under `mcpServers` in
 <tr><td>
 
 ```json
-"antigravity-intern": {
+"agent-intern": {
   "command": "python",
   "args": ["C:\\path\\to\\server.py"]
 }
@@ -132,7 +139,7 @@ Then point Claude Code at the absolute path to `server.py` under `mcpServers` in
 </td><td>
 
 ```json
-"antigravity-intern": {
+"agent-intern": {
   "command": "python3",
   "args": ["/path/to/server.py"]
 }
@@ -141,7 +148,7 @@ Then point Claude Code at the absolute path to `server.py` under `mcpServers` in
 </td></tr>
 </table>
 
-Restart Claude Code. Six tools appear: **`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_image`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, and **`antigravity_status`** (each prefixed `mcp__antigravity-intern__`). The single-prompt tools take a **`watch=true`** flag to open the live browser view — no separate `*_watch` tool.
+Restart Claude Code. **Eleven tools** appear — six for Antigravity (**`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_image`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, **`antigravity_status`**) and five for Codex (**`codex_ask`**, **`codex_continue`**, **`codex_ask_watch`**, **`codex_swarm`**, **`codex_status`**) — each prefixed `mcp__agent-intern__`. The single-prompt Antigravity tools take a **`watch=true`** flag for the live browser view; Codex has a dedicated **`codex_ask_watch`**.
 
 > *"Use antigravity_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -168,13 +175,51 @@ format itself (JPEG for photo-like images, PNG for flat graphics), so a requeste
 `out.png` may come back as `out.jpg`. The returned path always reflects the true
 format.
 
+<a id="codex-bridge"></a>
+
+## 🤖 Codex bridge
+
+Alongside Antigravity, the bridge drives **[OpenAI Codex](https://developers.openai.com/codex/)** via
+`codex exec`. Where `agy -p` is broken (it never writes to stdout, so the bridge scrapes transcript
+files), `codex exec` is well-behaved: it writes its final message to a file the bridge asks for via
+`-o/--output-last-message`, so the answer comes back clean — no scraping. Continue works by capturing
+the session id from codex's own rollout files (`~/.codex/sessions/.../rollout-*.jsonl`) and resuming
+with `codex exec resume <id>`.
+
+| Tool | Purpose |
+|---|---|
+| `codex_ask(prompt, workspace?, sandbox?="read-only", model?, timeout_s?=180)` | Start a **new** Codex session. `sandbox` is a **real** boundary (see below); `model` selects the model (`-m`). |
+| `codex_continue(prompt, workspace?, timeout_s?=180)` | Continue the Codex session **rooted at `workspace`** — resumes the exact session id, falling back to the newest on-disk session for that cwd after a server restart. |
+| `codex_ask_watch(prompt, workspace?, sandbox?, model?, timeout_s?=180)` | Like `codex_ask`, but open the live browser view, streaming codex's steps from its `--json` event stream (same viewer as the Antigravity watch — see [Watch mode](#watch-mode)). |
+| `codex_swarm(prompts, workspaces?, sandbox?, model?, max_concurrency?=4, timeout_s?=180)` | Run **several Codex prompts in parallel** as independent one-shot workers; every result in one block. |
+| `codex_status()` | Setup diagnostics: codex version, login status (`codex login status`), sessions dir. Spends no quota. |
+
+**How it differs from the Antigravity tools**
+
+- **Real sandbox.** `sandbox` accepts `read-only` (default — reads and answers, writes nothing),
+  `workspace-write` (may edit files under the workspace), or `danger-full-access` (no sandbox —
+  avoid). Unlike agy's no-op `--sandbox`, codex's `-s` actually enforces this. `codex exec` has no
+  interactive approval gate, so this flag **is** your safety boundary — opt into write access deliberately.
+- **Model selection works.** `model` maps to codex's `-m`; agy hangs on a model switch in print mode,
+  codex does not.
+- **No image tool.** Codex is a coding agent, not an image model — there's no `codex_image`. Its
+  strength is reasoning and real code/repo work.
+- **Auth.** Uses your existing Codex login (ChatGPT account or API key). Run `codex login` once; check
+  with `codex_status`. No new keys for the bridge to manage.
+
+> [!WARNING]
+> `codex exec` runs the model as an **autonomous agent with no interactive approval gate**. The
+> `sandbox` flag (default `read-only`) is the real boundary, but `workspace-write` /
+> `danger-full-access` let it modify files — and a swarm runs N agents at once. Only use it with
+> **trusted prompts on trusted content**.
+
 <a id="watch-mode"></a>
 
-## 👁️ Watch mode — Antigravity Intern (experimental)
+## 👁️ Watch mode — Agent Intern (experimental)
 
 Pass **`watch=true`** to `antigravity_ask`, `antigravity_continue`, or `antigravity_image`
 to **watch agy work live in a little terminal-style browser window** called
-**Antigravity Intern**. agy still runs headless; alongside it the bridge serves a tiny page on
+**Agent Intern**. agy still runs headless; alongside it the bridge serves a tiny page on
 `127.0.0.1` and opens it in a small, chromeless app window that streams agy's steps —
 its planner narration (▸), the **real commands** it runs (`$`), and completions (✓) —
 read live from the transcript, with the final answer rendered as Markdown (and, for
@@ -187,11 +232,11 @@ read live from the transcript, with the final answer rendered as Markdown (and, 
 <td width="50%" align="center"><b><code>antigravity_image</code> — image inline</b></td>
 </tr>
 <tr>
-<td><img src="assets/watch-ask.gif" width="100%" alt="Antigravity Intern watch window streaming agy's steps for a text ask — narration, the real commands it runs, completions — then rendering the final Markdown answer"></td>
-<td><img src="assets/watch-image.gif" width="100%" alt="Antigravity Intern watch window streaming an image generation and rendering the finished image inline"></td>
+<td><img src="assets/watch-ask.gif" width="100%" alt="Agent Intern watch window streaming agy's steps for a text ask — narration, the real commands it runs, completions — then rendering the final Markdown answer"></td>
+<td><img src="assets/watch-image.gif" width="100%" alt="Agent Intern watch window streaming an image generation and rendering the finished image inline"></td>
 </tr>
 </table>
-<sub>Real captures — agy runs headless while the <b>Antigravity Intern</b> window live-streams its steps (▸ narration · <code>$</code> commands · ✓ completions), then shows the final answer or image.</sub>
+<sub>Real captures — agy runs headless while the <b>Agent Intern</b> window live-streams its steps (▸ narration · <code>$</code> commands · ✓ completions), then shows the final answer or image.</sub>
 </div>
 
 - **Cross-platform & best-effort.** Prefers a Chromium browser (`--app` mode) for the
@@ -233,7 +278,7 @@ antigravity_swarm(prompts=[
 ```
 
 <div align="center">
-<img src="assets/watch-swarm.gif" width="62%" alt="Antigravity Swarm dashboard: three agy workers running in parallel, each row showing its repo, prompt, latest step and a per-worker time bar, while the overall done/total counter climbs 0/3 → 2/3 → 3/3">
+<img src="assets/watch-swarm.gif" width="62%" alt="Agent Swarm dashboard: three agy workers running in parallel, each row showing its repo, prompt, latest step and a per-worker time bar, while the overall done/total counter climbs 0/3 → 2/3 → 3/3">
 <br>
 <sub><code>antigravity_swarm(..., watch=true)</code> — one row per worker; the done/total bar climbs as workers finish. Click a row (or <b>↑/↓</b> then <b>↵</b>) to pop that agent into its own window.</sub>
 </div>
@@ -254,7 +299,7 @@ pressure for wall-clock.
   worker at the same dir; pass **one entry per prompt** for per-worker dirs.
 - **Error isolation** — a worker that fails is reported in place; the others still
   return.
-- **`watch=true`** — opens a thin live **Antigravity Swarm** dashboard (one row per
+- **`watch=true`** — opens a thin live **Agent Swarm** dashboard (one row per
   worker showing the repo, prompt, and latest step). **Click a row** to pop that
   agent out into its own window streaming its full step log, beside the dashboard.
 
@@ -368,7 +413,7 @@ amount.
 The final answer is request/response — `agy -p` returns it all at once, so the tools return when agy
 finishes (each call typically takes 10–30 s). If you want to *watch* agy work as it goes, pass
 **`watch=true`** to `antigravity_ask` / `antigravity_continue` / `antigravity_image`: it opens the
-**Antigravity Intern** browser window and live-streams agy's steps read from the transcript — see
+**Agent Intern** browser window and live-streams agy's steps read from the transcript — see
 [Watch mode](#watch-mode). It's coarse (a handful of steps, not token-by-token), and the returned
 value is identical to the non-watch call.
 </details>
@@ -403,7 +448,7 @@ way to run many agy calls at once.
   "print-mode resumption" changelog fix did **not** change this for fresh `-p`). If a future release
   fixes stdout, this workaround becomes redundant but harmless.
 - 👁️ **Watch mode is experimental** — pass `watch=true` to `antigravity_ask` / `antigravity_continue` /
-  `antigravity_image` to open the **Antigravity Intern** browser window and watch agy work live (coarse
+  `antigravity_image` to open the **Agent Intern** browser window and watch agy work live (coarse
   steps; image shown inline). Best-effort and cross-platform; see [Watch mode](#watch-mode).
 - 🔒 **No real sandbox** — agy's `--sandbox` (since 1.0.6) blocks only shell commands in `-p` but still
   leaves file writes and network egress open (and breaks transcript reading), so it's no boundary;
@@ -412,13 +457,16 @@ way to run many agy calls at once.
 ## Requirements
 
 - Python 3.10+
-- [`agy`](https://antigravity.google/) 1.0.0 or newer on `PATH` (state-file layout re-verified on **1.0.10**)
-- An active Antigravity / AI Pro session
+- **For the Antigravity tools:** [`agy`](https://antigravity.google/) 1.0.0+ on `PATH` (state-file layout re-verified on **1.0.10**) and an active Antigravity / AI Pro session
+- **For the Codex tools:** [`codex`](https://developers.openai.com/codex/) on `PATH` and logged in (`codex login`) — verified on **codex-cli 0.141.0**
+
+Each backend is independent — install only the CLI(s) you plan to use; the other tools simply report "not found" via their `*_status` tool.
 
 > [!TIP]
 > If `agy` isn't reliably on `PATH` (e.g. a new terminal or reboot drops it on Windows), set the
 > **`AGY_BIN`** env var to its full path and the bridge will use that instead of `"agy"` — e.g.
-> `AGY_BIN=%LOCALAPPDATA%\agy\bin\agy.exe`.
+> `AGY_BIN=%LOCALAPPDATA%\agy\bin\agy.exe`. Likewise, set **`CODEX_BIN`** if `codex` isn't reliably on
+> `PATH` (the native Windows installer puts it under `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\`).
 
 The bridge uses only cross-platform Python (`Path.home()`, `subprocess`) and reads paths under
 `~/.gemini/antigravity-cli/`, which `agy` writes the same way on every OS. **Developed and verified
@@ -439,7 +487,7 @@ swarm) that spends a little quota. Set **`AGY_BRIDGE_DEBUG=1`**
 to log per-call diagnostics (resolved conversation id, agy exit code, elapsed) to stderr — and on
 startup the server warns if your installed agy is newer than the version it was verified against.
 
-**Staying up to date.** Updates are opt-in by design: plain `uvx antigravity-intern` pins to the
+**Staying up to date.** Updates are opt-in by design: plain `uvx agent-intern` pins to the
 version it first cached, and a `git clone` never auto-updates — so the bridge only ever runs code
 you chose to install (it runs unsandboxed, so this is deliberate, not laziness). Nothing updates a
 *running* server either; new versions take effect on the next Claude Code restart. You find out about
@@ -447,14 +495,14 @@ a release two ways, both best-effort GitHub tag checks against the running code 
 `server.py`):
 
 - **In chat — [`antigravity_status`](#tools)** leads with a `bridge version` row, e.g.
-  `v0.10.3 (latest)` or `v0.10.3 -> v0.10.4 available; upgrade: uvx antigravity-intern@latest`. This
+  `v0.10.3 (latest)` or `v0.10.3 -> v0.10.4 available; upgrade: uvx agent-intern@latest`. This
   is the notice you actually see in the MCP client's UI (an available update stays `[ok]` — it's
   informational, not a fault).
 - **At startup — stderr**, where the server logs the same one-line warning. This lands in the host's
   MCP logs only (e.g. via `/mcp` in Claude Code), not the chat.
 
-Upgrade with `uvx antigravity-intern@latest` (or `git pull`) and restart, or opt into hands-off
-auto-updates by putting `antigravity-intern@latest` in the config. Both checks are silent when
+Upgrade with `uvx agent-intern@latest` (or `git pull`) and restart, or opt into hands-off
+auto-updates by putting `agent-intern@latest` in the config. Both checks are silent when
 offline or rate-limited and never block startup. Control them with:
 
 | Env var | Effect |
@@ -472,8 +520,8 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 The tag triggers two workflows: `release.yml` cuts a GitHub Release with auto-generated notes, and
 `publish.yml` builds and uploads to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
 (no stored token — `publish.yml` verifies the tag matches `pyproject.toml` first). One-time setup:
-register the trusted publisher at `pypi.org/manage/project/antigravity-intern/settings/publishing/`
-(repo `SinanTufekci/antigravity-intern`, workflow `publish.yml`, environment `pypi`).
+register the trusted publisher at `pypi.org/manage/project/agent-intern/settings/publishing/`
+(repo `SinanTufekci/agent-intern`, workflow `publish.yml`, environment `pypi`).
 
 ## Contributing
 

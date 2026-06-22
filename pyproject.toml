@@ -1,7 +1,7 @@
 [project]
-name = "antigravity-intern"
-version = "0.12.1"
-description = "MCP server bridging Antigravity CLI (agy) so Claude Code can use it as a sub-agent"
+name = "agent-intern"
+version = "0.13.0"
+description = "MCP server bridging the Antigravity (agy) and OpenAI Codex CLIs so Claude Code can drive them as sub-agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -30,23 +30,23 @@ dev = [
 ]
 
 [project.scripts]
-antigravity-intern = "server:main"
+agent-intern = "server:main"
 
 [project.urls]
-Homepage = "https://github.com/SinanTufekci/antigravity-intern"
-Repository = "https://github.com/SinanTufekci/antigravity-intern"
-Issues = "https://github.com/SinanTufekci/antigravity-intern/issues"
+Homepage = "https://github.com/SinanTufekci/agent-intern"
+Repository = "https://github.com/SinanTufekci/agent-intern"
+Issues = "https://github.com/SinanTufekci/agent-intern/issues"
 Sponsor = "https://github.com/sponsors/SinanTufekci"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# Flat layout: the distributable is the server module plus its swarm helpers.
-# Without this, setuptools auto-discovery aborts because the repo root also holds
-# test_*.py.
+# Flat layout: the distributable is the server module plus its swarm + codex
+# helpers. Without this, setuptools auto-discovery aborts because the repo root
+# also holds test_*.py.
 [tool.setuptools]
-py-modules = ["server", "swarm", "swarm_watch"]
+py-modules = ["server", "swarm", "swarm_watch", "codex_bridge"]
 
 [tool.ruff]
 line-length = 100

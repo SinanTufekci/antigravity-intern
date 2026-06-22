@@ -372,7 +372,7 @@ def test_bridge_version_status_flags_newer_release(monkeypatch):
     assert label == "bridge version"
     assert ok is True  # an available update is informational, not a fault
     assert "0.10.2" in detail and "available" in detail
-    assert "uvx antigravity-intern@latest" in detail
+    assert "uvx agent-intern@latest" in detail
 
 
 def test_bridge_version_status_reports_latest(monkeypatch):
