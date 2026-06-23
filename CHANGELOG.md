@@ -10,6 +10,8 @@ summary.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-23
+
 ### Changed
 
 - **BREAKING:** folded Codex's live watch view into a `watch=true` flag on `codex_ask` and
