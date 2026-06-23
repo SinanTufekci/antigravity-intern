@@ -10,6 +10,7 @@ test_smoke.py instead.
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import time
 
@@ -77,6 +78,10 @@ def brain_dir(tmp_path, monkeypatch):
     d = tmp_path / "brain"
     d.mkdir()
     monkeypatch.setattr(server, "BRAIN_DIR", d)
+    # Isolate the SQLite fallback too, so _read_response never reads the real store.
+    conv = tmp_path / "conversations"
+    conv.mkdir()
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", conv)
     return d
 
 
@@ -173,14 +178,6 @@ def test_read_response_missing_transcript_no_db_mentions_sqlite(brain_dir):
     (brain_dir / "c4").mkdir()
     with pytest.raises(RuntimeError, match="SQLite"):
         server._read_response("c4")
-
-
-def test_read_response_missing_transcript_with_db_points_at_db(brain_dir):
-    conv_dir = brain_dir / "c5"
-    conv_dir.mkdir()
-    (conv_dir / "conversation.db").write_text("", encoding="utf-8")
-    with pytest.raises(RuntimeError, match=r"conversation\.db"):
-        server._read_response("c5")
 
 
 # --------------------------------------------------------------------------
@@ -1309,3 +1306,108 @@ def test_viewer_is_live_reflects_recent_poll(monkeypatch):
     # A poll within the alive window -> live, so a new run reuses the open window.
     monkeypatch.setattr(server, "_WATCH_LAST_POLL", time.time())
     assert server._viewer_is_live() is True
+
+
+# --------------------------------------------------------------------------
+# SQLite (.db) transcript fallback: protobuf helpers + _read_response_db
+# --------------------------------------------------------------------------
+
+
+def _pb_enc_varint(n):
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _pb_tag(field, wt):
+    return _pb_enc_varint((field << 3) | wt)
+
+
+def _pb_str(field, s):
+    b = s.encode("utf-8")
+    return _pb_tag(field, 2) + _pb_enc_varint(len(b)) + b
+
+
+def _pb_varint_field(field, n):
+    return _pb_tag(field, 0) + _pb_enc_varint(n)
+
+
+def _pb_submsg(field, payload):
+    return _pb_tag(field, 2) + _pb_enc_varint(len(payload)) + payload
+
+
+def _planner_payload(text):
+    """A step_payload shaped like agy's: step_type(f1)=15, status(f4)=3, and the
+    answer at field 20 -> field 1 (the layout _read_response_db reads)."""
+    return _pb_varint_field(1, 15) + _pb_varint_field(4, 3) + _pb_submsg(20, _pb_str(1, text))
+
+
+def _make_steps_db(path, rows):
+    """rows: (idx, step_type, status, step_payload) tuples -> a minimal agy `.db`."""
+    con = sqlite3.connect(path)
+    con.execute(
+        "CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, "
+        "status integer NOT NULL DEFAULT 0, step_payload blob, PRIMARY KEY (idx))"
+    )
+    con.executemany(
+        "INSERT INTO steps (idx, step_type, status, step_payload) VALUES (?,?,?,?)", rows
+    )
+    con.commit()
+    con.close()
+
+
+def test_pb_wire_roundtrip():
+    blob = _pb_varint_field(1, 15) + _pb_str(3, "héllo") + _pb_submsg(20, _pb_str(1, "answer"))
+    fields = server._pb_fields(blob)
+    assert (1, 0, 15) in fields  # varint field
+    assert server._pb_bytes(fields, 3)[0].decode("utf-8") == "héllo"  # string field
+    sub = server._pb_bytes(fields, 20)[0]  # sub-message
+    assert server._pb_bytes(server._pb_fields(sub), 1)[0].decode("utf-8") == "answer"
+
+
+def test_pb_fields_tolerates_garbage():
+    # Best-effort: malformed trailing bytes must not raise.
+    assert isinstance(server._pb_fields(b"\xff\xff\xff"), list)
+    assert server._pb_fields(b"") == []
+
+
+def test_read_response_db_returns_last_done_planner(tmp_path, monkeypatch):
+    conv = "11111111-1111-1111-1111-111111111111"
+    _make_steps_db(
+        str(tmp_path / f"{conv}.db"),
+        [
+            (0, 15, 3, _planner_payload("first draft")),  # earlier planner response
+            (1, 8, 3, b"\x08\x08tool-step"),  # non-planner step (filtered out)
+            (2, 15, 0, _planner_payload("still working")),  # planner but not DONE (filtered)
+            (3, 15, 3, _planner_payload("FINAL ✓ answer")),  # last completed planner -> wins
+        ],
+    )
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", tmp_path)
+    assert server._read_response_db(conv) == "FINAL ✓ answer"
+
+
+def test_read_response_db_missing_or_no_match(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", tmp_path)
+    assert server._read_response_db("does-not-exist") is None
+    conv = "22222222-2222-2222-2222-222222222222"
+    _make_steps_db(str(tmp_path / f"{conv}.db"), [(0, 8, 3, b"\x08\x08only-a-tool")])
+    assert server._read_response_db(conv) is None  # no planner-response step
+
+
+def test_read_response_falls_back_to_db(tmp_path, monkeypatch):
+    conv = "33333333-3333-3333-3333-333333333333"
+    monkeypatch.setattr(server, "BRAIN_DIR", tmp_path / "brain")  # no JSONL transcript
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", tmp_path)
+    _make_steps_db(str(tmp_path / f"{conv}.db"), [(0, 15, 3, _planner_payload("from the db"))])
+    assert server._read_response(conv) == "from the db"
+
+
+def test_read_response_raises_when_neither_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "BRAIN_DIR", tmp_path / "brain")
+    monkeypatch.setattr(server, "CONVERSATIONS_DIR", tmp_path)
+    with pytest.raises(RuntimeError):
+        server._read_response("44444444-4444-4444-4444-444444444444")

@@ -379,11 +379,14 @@ apply, and you're responsible for staying within them.
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
 schemas and break it silently. Re-verified working on **1.0.10** (transcript schema and `-p` JSONL
-output unchanged; live ask round-trip + `antigravity_status` diagnostics pass). The known future risk
+output unchanged; live ask round-trip + `antigravity_status` diagnostics pass). The big looming change
 is agy's **SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): agy
 1.0.10 still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
-alongside the JSONL transcript, so once it stops writing JSONL the reader needs a SQLite path. Pin a
-known-good `agy` version if you depend on this.
+alongside the JSONL transcript. The bridge is **ready for it** — `_read_response` reads the JSONL when
+present and **falls back to the `.db`** (parsing the `steps` table's protobuf payload) when it isn't,
+which already happens for `--sandbox` runs. Verified to match the JSONL answer across 100+ local
+conversations. Still, the `.db` schema is undocumented and could change, so pin a known-good `agy`
+version if you depend on this.
 </details>
 
 <details>
@@ -447,9 +450,10 @@ workers). That's the supported way to run many calls at once, across either back
   not stdout; under a TUI that text leaks into the host's prompt (seen on 1.0.9 before the fix). The
   bridge now spawns agy detached from the terminal (`CREATE_NO_WINDOW` / a new POSIX session), so it
   can't leak; the answer is still read from the transcript.
-- ⏳ **SQLite migration is the real risk** — agy 1.0.10 still dual-writes a `.db` per conversation;
-  see the [FAQ](#faq). `_read_response` raises a clear, SQLite-aware error if the JSONL transcript
-  ever disappears.
+- 💾 **SQLite migration — handled** — agy 1.0.10 still dual-writes a `.db` per conversation; when the
+  JSONL transcript is absent (already true for `--sandbox` runs, and the announced future default)
+  `_read_response` falls back to reading the `.db`, verified to match across 100+ conversations. See
+  the [FAQ](#faq).
 - 🐛 **Stdout bug persists** — `-p` still doesn't print the answer to stdout on 1.0.9 (the 1.0.9
   "print-mode resumption" changelog fix did **not** change this for fresh `-p`). If a future release
   fixes stdout, this workaround becomes redundant but harmless.

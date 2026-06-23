@@ -35,11 +35,12 @@ settings fixes, or rundll32 browser sign-in — touches the paths, schema, or th
 print-mode TTY-leak this bridge depends on.) agy now ALSO dual-writes every
 conversation to a SQLite store at ~/.gemini/antigravity-cli/conversations/<id>.db;
 the 1.0.4
-changelog says SQLite "will be the CLI's conversation format", so once JSONL
-stops being written the bridge breaks and _read_response will need a SQLite
-reader (it already raises a clear, SQLite-aware error when the transcript is
-missing). The 1.0.5 -p metadata fix also stopped agy from writing metadata to
-the cwd, so last_conversations.json now updates reliably under cache/.
+changelog says SQLite "will be the CLI's conversation format", so JSONL is on its
+way out. _read_response handles this: it reads the JSONL transcript when present
+and falls back to the SQLite store (_read_response_db) when it isn't — already the
+case for --sandbox runs — so the bridge keeps working once JSONL goes away. The
+1.0.5 -p metadata fix also stopped agy from writing metadata to the cwd, so
+last_conversations.json now updates reliably under cache/.
 
 SECURITY — read this: `agy -p` runs the model as an autonomous agent that
 auto-executes its tools (read/write files, run shell commands, reach the
@@ -78,6 +79,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -335,50 +337,145 @@ def _find_newest_conv_after(start_time: float) -> Optional[str]:
     return best
 
 
-def _read_response(conv_id: str) -> str:
-    transcript = BRAIN_DIR / conv_id / ".system_generated" / "logs" / "transcript.jsonl"
-    if not transcript.exists():
-        # agy 1.0.4 added a SQLite (.db) conversation format and announced it
-        # "will be the CLI's conversation format". This is where the bridge
-        # breaks first if a future release stops writing JSONL transcripts.
-        conv_dir = BRAIN_DIR / conv_id
-        db_files = sorted(str(p) for p in conv_dir.glob("**/*.db")) if conv_dir.exists() else []
-        if db_files:
-            hint = (
-                f" Found SQLite store(s) instead: {db_files}. agy appears to have "
-                "migrated this conversation to its 1.0.4 SQLite format; the bridge's "
-                "JSONL transcript reader needs updating to read from the .db file."
-            )
-        else:
-            hint = (
-                " No JSONL transcript in the conversation dir. If you upgraded agy, it "
-                "may have switched to the SQLite (.db) conversation format added in 1.0.4."
-            )
-        raise RuntimeError(f"Transcript not found: {transcript}.{hint}")
+# --- minimal protobuf wire reader, for agy's SQLite `steps.step_payload` blobs ---
+# agy 1.0.4 added a SQLite conversation store and the changelog says it "will be
+# the CLI's conversation format". When agy stops writing the JSONL transcript the
+# bridge falls back to reading the .db (see _read_response_db). The schema is
+# undocumented; these helpers walk the protobuf wire format well enough to pull
+# the final answer — verified against the JSONL transcript across 114 local
+# conversations (104 byte-identical, 10 a longer superset, 0 wrong).
+def _pb_varint(buf: bytes, i: int):
+    shift = val = 0
+    while True:
+        b = buf[i]
+        i += 1
+        val |= (b & 0x7F) << shift
+        if not b & 0x80:
+            return val, i
+        shift += 7
 
-    chunks: list[str] = []
-    for line in transcript.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
+
+def _pb_fields(buf: bytes) -> list:
+    """(field_number, wire_type, value) for each field in a protobuf message.
+    value is raw bytes for length-delimited fields and the int for varints; other
+    wire types are skipped. Best-effort — stops on malformed input, never raises."""
+    out: list = []
+    i, n = 0, len(buf)
+    while i < n:
         try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if (
-            entry.get("source") == "MODEL"
-            and entry.get("status") == "DONE"
-            and entry.get("type") == "PLANNER_RESPONSE"
-            and entry.get("content")
-        ):
-            chunks.append(entry["content"])
+            tag, i = _pb_varint(buf, i)
+            field, wt = tag >> 3, tag & 7
+            if wt == 0:
+                v, i = _pb_varint(buf, i)
+                out.append((field, 0, v))
+            elif wt == 2:
+                ln, i = _pb_varint(buf, i)
+                out.append((field, 2, buf[i : i + ln]))
+                i += ln
+            elif wt == 5:
+                i += 4
+            elif wt == 1:
+                i += 8
+            else:
+                break
+        except IndexError:
+            break
+    return out
 
-    if not chunks:
+
+def _pb_bytes(fields: list, num: int) -> list:
+    """The length-delimited values of field `num` (bytes / string / sub-message)."""
+    return [v for f, wt, v in fields if f == num and wt == 2]
+
+
+# step_type / status codes in the SQLite `steps` table, reverse-engineered to
+# mirror the JSONL transcript's type=PLANNER_RESPONSE / status=DONE filter.
+_DB_PLANNER_RESPONSE = 15
+_DB_STATUS_DONE = 3
+
+
+def _read_response_db(conv_id: str) -> Optional[str]:
+    """Final planner answer from agy's SQLite store (`conversations/<id>.db`).
+
+    Mirrors _read_response's JSONL logic — the last completed planner-response
+    step's text — read from the `steps` table (step_payload protobuf: the
+    sub-message at field 20, its string at field 1). Returns None if the .db is
+    missing/unreadable or has no such step, so the caller can fall through to a
+    clear error. Best-effort: agy's schema is undocumented and may change."""
+    db_path = CONVERSATIONS_DIR / f"{conv_id}.db"
+    if not db_path.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT step_payload FROM steps WHERE step_type=? AND status=? ORDER BY idx",
+                (_DB_PLANNER_RESPONSE, _DB_STATUS_DONE),
+            ).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    answer: Optional[str] = None
+    for (payload,) in rows:
+        if not payload:
+            continue
+        for sub in _pb_bytes(_pb_fields(payload), 20):
+            for text in _pb_bytes(_pb_fields(sub), 1):
+                try:
+                    decoded = text.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+                if decoded.strip():
+                    answer = decoded
+    return answer
+
+
+def _read_response(conv_id: str) -> str:
+    """Final model answer for a conversation: the last completed planner response.
+
+    Reads agy's JSONL transcript (the fast path) and falls back to its SQLite
+    conversation store when the JSONL is missing or empty. That fallback matters
+    today (a --sandbox run writes no JSONL, only the .db) and is the migration agy
+    has announced — so the bridge keeps working once JSONL goes away entirely."""
+    transcript = BRAIN_DIR / conv_id / ".system_generated" / "logs" / "transcript.jsonl"
+    chunks: list[str] = []
+    if transcript.exists():
+        for line in transcript.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                entry.get("source") == "MODEL"
+                and entry.get("status") == "DONE"
+                and entry.get("type") == "PLANNER_RESPONSE"
+                and entry.get("content")
+            ):
+                chunks.append(entry["content"])
+    if chunks:
+        # Last completed planner response is the final answer (tool steps come earlier).
+        return chunks[-1]
+
+    # JSONL absent or empty — fall back to the SQLite (.db) store.
+    db_answer = _read_response_db(conv_id)
+    if db_answer is not None:
+        return db_answer
+
+    db_path = CONVERSATIONS_DIR / f"{conv_id}.db"
+    if not transcript.exists():
         raise RuntimeError(
-            f"No completed MODEL response in transcript {transcript}. "
-            "agy may have failed silently or timed out."
+            f"No transcript for conversation {conv_id}: neither the JSONL ({transcript}) "
+            f"nor a readable SQLite store ({db_path}) yielded a completed planner response. "
+            "If you upgraded agy, its conversation format may have changed in a way the "
+            "bridge can't yet parse."
         )
-    # Last completed planner response is the final answer (tool steps come earlier).
-    return chunks[-1]
+    raise RuntimeError(
+        f"No completed MODEL response in transcript {transcript} (and no usable SQLite "
+        f"fallback at {db_path}). agy may have failed silently or timed out."
+    )
 
 
 def _transcript_entries(conv_id: str) -> list[dict]:

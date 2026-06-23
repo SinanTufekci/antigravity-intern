@@ -10,6 +10,17 @@ summary.
 
 ## [Unreleased]
 
+### Added
+
+- **SQLite (`.db`) transcript fallback.** When agy's JSONL transcript is missing or empty,
+  `_read_response` now reads the answer from agy's SQLite conversation store
+  (`conversations/<id>.db`) instead of failing — walking the `steps` table's protobuf `step_payload`
+  (the planner response is the sub-message at field 20, its text at field 1) for the last completed
+  planner step. This already covers `--sandbox` runs (which write no JSONL) and future-proofs the
+  bridge against agy's announced switch to SQLite as the default conversation format. The reader was
+  reverse-engineered and verified to match the JSONL answer across 115 local conversations (104
+  byte-identical, 11 a superset, **0 wrong**).
+
 ## [0.14.1] - 2026-06-23
 
 ### Added
