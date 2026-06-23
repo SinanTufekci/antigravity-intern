@@ -183,14 +183,16 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.1...HEAD
-[0.12.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.12.0...v0.12.1
-[0.12.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.4...v0.11.0
-[0.10.4]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.3...v0.10.4
-[0.10.3]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.2...v0.10.3
-[0.10.2]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.1...v0.10.2
-[0.10.1]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.10.0...v0.10.1
-[0.10.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.9.0...v0.10.0
-[0.9.0]: https://github.com/SinanTufekci/antigravity-intern/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/SinanTufekci/antigravity-intern/releases/tag/v0.8.0
+[Unreleased]: https://github.com/SinanTufekci/agent-intern/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/SinanTufekci/agent-intern/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.10.4...v0.11.0
+[0.10.4]: https://github.com/SinanTufekci/agent-intern/compare/v0.10.3...v0.10.4
+[0.10.3]: https://github.com/SinanTufekci/agent-intern/compare/v0.10.2...v0.10.3
+[0.10.2]: https://github.com/SinanTufekci/agent-intern/compare/v0.10.1...v0.10.2
+[0.10.1]: https://github.com/SinanTufekci/agent-intern/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/SinanTufekci/agent-intern/releases/tag/v0.8.0
