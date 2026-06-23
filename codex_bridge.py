@@ -36,7 +36,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -483,69 +482,3 @@ def status_rows() -> list[tuple[str, bool, str]]:
     rows.append(("pinned sessions", True, f"{n_pins} workspace(s) pinned this run"))
 
     return rows
-
-
-# ----------------------------------------------------------------- parallel swarm
-def _broadcast_workspaces(workspaces, n: int) -> list[str]:
-    """Per-worker workspace list of length n. None -> all server cwd; a single
-    entry -> broadcast to all; n entries -> as given. Mirrors the agy swarm
-    shorthand. Raises if the count is neither 1 nor n."""
-    if workspaces is None:
-        return [normalize_workspace(None)] * n
-    if isinstance(workspaces, str):
-        return [normalize_workspace(workspaces)] * n
-    if len(workspaces) == 1:
-        return [normalize_workspace(workspaces[0])] * n
-    if len(workspaces) != n:
-        raise ValueError(f"workspaces has {len(workspaces)} entries; expected 1 or {n}")
-    return [normalize_workspace(w) for w in workspaces]
-
-
-def swarm_codex(
-    prompts: list[str],
-    workspaces=None,
-    sandbox: str = DEFAULT_SANDBOX,
-    model: Optional[str] = None,
-    max_concurrency: int = 4,
-    timeout_s: int = 180,
-) -> list[dict]:
-    """Run several codex prompts in parallel as independent one-shot workers.
-
-    Each worker launches a fresh `codex exec` with its own -o file, so there's no
-    shared mutable state to race on — unlike agy (which rewrites
-    last_conversations.json per call and thus needs an isolated HOME per worker),
-    codex needs no isolation here. Workers run with pin=False since swarm runs are
-    one-shot (no codex_continue afterwards). Returns a list aligned to `prompts`:
-    {index, workspace, ok, answer} or {index, workspace, ok: False, error}.
-    """
-    n = len(prompts)
-    if n == 0:
-        return []
-    validate_sandbox(sandbox)
-    wss = _broadcast_workspaces(workspaces, n)
-    results: list = [None] * n
-
-    def work(i: int) -> dict:
-        try:
-            ans = run_codex(prompts[i], wss[i], sandbox, model, False, timeout_s, pin=False)
-            return {"index": i, "workspace": wss[i], "ok": True, "answer": ans}
-        except Exception as e:  # noqa: BLE001 — one worker failing must not sink the rest
-            return {"index": i, "workspace": wss[i], "ok": False, "error": str(e)}
-
-    with ThreadPoolExecutor(max_workers=max(1, min(max_concurrency, n))) as ex:
-        for r in ex.map(work, range(n)):
-            results[r["index"]] = r
-    return results
-
-
-def format_swarm_results(results: list[dict]) -> str:
-    """Render swarm_codex results as one human-readable block, one entry per worker."""
-    blocks = []
-    for r in results:
-        repo = os.path.basename((r["workspace"] or "").rstrip("/\\")) or r["workspace"]
-        head = f"[{r['index'] + 1}] {repo}"
-        if r.get("ok"):
-            blocks.append(f"{head}\n{r['answer']}")
-        else:
-            blocks.append(f"{head}\nERROR: {r.get('error', 'unknown')}")
-    return "\n\n---\n\n".join(blocks)

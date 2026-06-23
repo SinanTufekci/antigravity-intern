@@ -360,3 +360,19 @@ def test_watch_init_stores_backends():
     snap = swarm_watch._snapshot()
     assert snap["workers"][0]["backend"] == "antigravity"
     assert snap["workers"][1]["backend"] == "codex"
+
+
+def test_run_codex_worker_never_pins(monkeypatch):
+    # Swarm codex workers are one-shot — they must call run_codex with pin=False.
+    import codex_bridge
+
+    seen = {}
+
+    def fake_run(prompt, ws, sandbox, model, cont, t, pin=True):
+        seen["pin"] = pin
+        return "ans:" + prompt
+
+    monkeypatch.setattr(codex_bridge, "run_codex", fake_run)
+    r = swarm._run_codex_worker(0, "hello", os.getcwd(), "read-only", None, 5)
+    assert r.ok and r.answer == "ans:hello" and r.backend == "codex"
+    assert seen["pin"] is False

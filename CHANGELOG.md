@@ -27,10 +27,13 @@ summary.
 
 ### Fixed
 
-- `test_codex.py`'s cwd test recursed infinitely on POSIX — a monkeypatched `os.getcwd` called
-  `os.path.abspath`, which re-enters `getcwd` when the path isn't absolute on that OS, so it only
-  passed on Windows. CI now also runs `test_codex.py` (it previously ran only `test_server.py` +
-  `test_swarm.py`), which surfaced it on Linux/macOS.
+- CI now also runs `test_codex.py` (it previously ran only `test_server.py` + `test_swarm.py`),
+  which surfaced two latent POSIX bugs: a cwd test recursed infinitely (a monkeypatched `os.getcwd`
+  called `os.path.abspath`, which re-enters `getcwd` when the path isn't absolute off-Windows), and
+  `codex_bridge.format_swarm_results` used `os.path.basename` (wrong for backslash paths off-Windows).
+  The recursion is fixed; the basename bug is moot — `swarm_codex` / `format_swarm_results` /
+  `_broadcast_workspaces` became dead code when `agent_swarm` replaced the per-backend swarms, so they
+  were removed.
 
 ## [0.14.0] - 2026-06-23
 
