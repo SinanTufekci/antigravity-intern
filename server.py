@@ -99,7 +99,7 @@ mcp = FastMCP("agent-intern")
 # installed package metadata, which goes stale on editable installs). Keep in
 # sync with pyproject.toml's version. Compared at startup against the latest
 # tag on GitHub so a long-lived clone learns when to `git pull`.
-__version__ = "0.14.0"
+__version__ = "0.14.1"
 
 # Logs go to stderr (stdout is the MCP protocol channel). Quiet by default;
 # set AGY_BRIDGE_DEBUG=1 for per-call diagnostics. See _configure_logging.
@@ -1617,55 +1617,47 @@ def _broadcast_workspaces(workspaces: Optional[list], n: int):
 
 @mcp.tool(
     annotations={
-        "title": "Run Antigravity prompts in parallel",
+        "title": "Agent swarm (mixed Antigravity + Codex, parallel)",
         "readOnlyHint": False,
         "idempotentHint": False,
         "openWorldHint": True,
     }
 )
-def antigravity_swarm(
-    prompts: list[str],
-    workspaces: Optional[list[str]] = None,
+def agent_swarm(
+    tasks: list[dict],
     max_concurrency: int = 4,
     timeout_s: int = 180,
     watch: bool = False,
 ) -> str:
-    """Run several Antigravity (Gemini 3.5 Flash High) prompts IN PARALLEL.
+    """Run SEVERAL tasks IN PARALLEL across BOTH backends in a single swarm.
 
-    Fans the prompts out to independent agy workers that run truly concurrently
-    (each in its own isolated state dir, so they never race), capped at
-    `max_concurrency`. Returns one combined text block with every worker's answer,
-    labelled by index. A worker that fails is reported in place — the others still
-    return (error isolation).
+    Each task is its own worker and names the backend to run on, so one swarm can
+    mix Antigravity (Gemini) and Codex workers — they run truly concurrently
+    (capped at `max_concurrency`) and every answer comes back in one labelled
+    block. A worker that fails is reported in place; the others still return.
 
-    Use this to parallelise independent, cheap sub-tasks (e.g. summarise N files,
-    ask the same question about N repos). For a single prompt use antigravity_ask.
-
-    SECURITY: this launches N unsandboxed agy agents at once — N times the
+    SECURITY: this launches N unsandboxed agents at once — N times the
     prompt-injection surface of a single call (see the module SECURITY note). Only
     use it with trusted prompts on trusted content.
 
     Args:
-        prompts: One prompt per parallel worker.
-        workspaces: Working directory per worker. Omit for the server cwd; pass a
-                    1-item list to point every worker at the same dir; pass one
-                    entry per prompt to give each worker its own dir.
+        tasks: One object per parallel worker:
+               - backend: "antigravity" (alias "agy"/"gemini") or "codex" (required)
+               - prompt:  the question or instruction (required)
+               - workspace: working dir for that worker (default: server cwd)
+               - sandbox: Codex only — "read-only" (default), "workspace-write",
+                          or "danger-full-access". Ignored for Antigravity.
+               - model:   Codex only — model override (`-m`). Ignored for Antigravity.
         max_concurrency: Max workers running at once (default 4). Higher = faster
                          but more quota/rate-limit pressure and more agents at once.
         timeout_s: Per-worker timeout in seconds. Default 180.
-        watch: If true, open the live "Agent Swarm" dashboard window (one row
-               per worker; click a row to open that agent's full step log beside it).
+        watch: If true, open the live "Agent Swarm" dashboard window (one row per
+               worker, with a backend badge; click a row for its full step log).
     """
     import swarm
 
-    results = swarm.swarm_ask(
-        prompts,
-        workspaces=_broadcast_workspaces(workspaces, len(prompts)),
-        max_concurrency=max_concurrency,
-        timeout_s=timeout_s,
-        watch=watch,
-    )
-    return swarm.format_text_results(results)
+    results = swarm.swarm_agents(tasks, max_concurrency, timeout_s, watch)
+    return swarm.format_agent_results(results)
 
 
 @mcp.tool(
@@ -1950,48 +1942,6 @@ def _run_codex_watched(
         raise
     _watch_finish("done", answer, time.time() - start)
     return answer
-
-
-@mcp.tool(
-    annotations={
-        "title": "Codex swarm (parallel sessions)",
-        "readOnlyHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True,
-    }
-)
-def codex_swarm(
-    prompts: list[str],
-    workspaces: Optional[list[str]] = None,
-    sandbox: str = codex_bridge.DEFAULT_SANDBOX,
-    model: Optional[str] = None,
-    max_concurrency: int = 4,
-    timeout_s: int = 180,
-) -> str:
-    """Run SEVERAL Codex prompts IN PARALLEL as independent one-shot workers.
-
-    Good for independent sub-tasks — answer N questions, summarise N files/repos —
-    without paying for them serially. Each worker is a fresh `codex exec` with its
-    own output file, so they don't race (codex needs no isolated HOME, unlike the
-    agy swarm). Returns every worker's result in one block; a worker that fails is
-    reported in place while the others still return. Workers are one-shot: there is
-    no codex_continue for a swarm worker's session.
-
-    Args:
-        prompts: One prompt per parallel worker.
-        workspaces: Working root per worker — omit for the server cwd, pass a
-                    1-item list to point every worker at the same dir, or one entry
-                    per prompt for per-worker dirs.
-        sandbox: Filesystem policy for all workers (read-only default; see codex_ask).
-        model: Optional model override (`-m`) applied to all workers.
-        max_concurrency: Max workers running at once (default 4).
-        timeout_s: Per-worker timeout in seconds. Default 180.
-    """
-    codex_bridge.validate_sandbox(sandbox)
-    results = codex_bridge.swarm_codex(
-        prompts, workspaces, sandbox, model, max_concurrency, timeout_s
-    )
-    return codex_bridge.format_swarm_results(results)
 
 
 def main() -> None:

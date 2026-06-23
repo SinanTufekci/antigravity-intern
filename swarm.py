@@ -145,6 +145,7 @@ class WorkerResult:
     image_path: Optional[str] = None
     image_format: Optional[str] = None
     image_size: Optional[int] = None
+    backend: str = ""
 
 
 def _normalize_workspaces(n: int, workspaces: Union[None, str, list]) -> list[str]:
@@ -516,3 +517,177 @@ def format_image_results(results: list[WorkerResult]) -> str:
             parts.append(f"[image {r.index}] ERROR ({r.elapsed}s) {r.error}")
     ok = sum(1 for r in results if r.ok)
     return f"image swarm: {ok}/{len(results)} succeeded\n\n" + "\n".join(parts)
+
+
+# ----------------------------------------------------------------- unified agent swarm
+_BACKEND_ALIASES = {
+    "antigravity": "antigravity",
+    "agy": "antigravity",
+    "gemini": "antigravity",
+    "codex": "codex",
+    "openai": "codex",
+}
+
+
+def _normalize_tasks(tasks) -> list[dict]:
+    """Validate + canonicalize agent_swarm tasks into a uniform list.
+
+    Each task is {backend, prompt, workspace?, sandbox?, model?}. backend accepts a
+    few aliases; sandbox/model are Codex-only (dropped for Antigravity). Raises
+    ValueError naming the offending index on bad input.
+    """
+    if not isinstance(tasks, list):
+        raise ValueError("tasks must be a list of {backend, prompt, ...} objects")
+    out: list[dict] = []
+    for i, t in enumerate(tasks):
+        if not isinstance(t, dict):
+            raise ValueError(f"task {i}: must be an object, got {type(t).__name__}")
+        backend = _BACKEND_ALIASES.get(str(t.get("backend", "")).strip().lower())
+        if backend is None:
+            raise ValueError(
+                f"task {i}: backend must be 'antigravity' or 'codex' (got {t.get('backend')!r})"
+            )
+        prompt = t.get("prompt")
+        if not prompt or not str(prompt).strip():
+            raise ValueError(f"task {i}: 'prompt' is required")
+        ws = t.get("workspace")
+        workspace = os.path.abspath(ws) if ws else os.getcwd()
+        sandbox = None
+        model = None
+        if backend == "codex":
+            import codex_bridge
+
+            sandbox = t.get("sandbox") or codex_bridge.DEFAULT_SANDBOX
+            codex_bridge.validate_sandbox(sandbox)  # fail fast on a bad policy
+            model = t.get("model") or None
+        out.append(
+            {
+                "backend": backend,
+                "prompt": str(prompt),
+                "workspace": workspace,
+                "sandbox": sandbox,
+                "model": model,
+            }
+        )
+    return out
+
+
+def _run_codex_worker(index, prompt, workspace, sandbox, model, timeout_s) -> WorkerResult:
+    import codex_bridge
+
+    start = time.time()
+    try:
+        os.makedirs(workspace, exist_ok=True)
+        ans = codex_bridge.run_codex(prompt, workspace, sandbox, model, False, timeout_s, pin=False)
+        return WorkerResult(
+            index,
+            True,
+            answer=ans,
+            elapsed=round(time.time() - start, 1),
+            workspace=workspace,
+            backend="codex",
+        )
+    except Exception as e:  # noqa: BLE001 — error isolation: one worker must not sink the swarm
+        return WorkerResult(
+            index,
+            False,
+            error=str(e),
+            elapsed=round(time.time() - start, 1),
+            workspace=workspace,
+            backend="codex",
+        )
+
+
+def _run_codex_worker_watched(index, prompt, workspace, sandbox, model, timeout_s) -> WorkerResult:
+    import codex_bridge
+    import server
+    import swarm_watch
+
+    start = time.time()
+    swarm_watch.worker_update(index, status="working", started=start)
+
+    def on_event(ev: dict) -> None:
+        lines = server._codex_event_to_watch_lines(ev)
+        if lines:
+            t = round(time.time() - start, 1)
+            swarm_watch.worker_append(index, [{"kind": k, "text": x, "t": t} for k, x in lines])
+
+    try:
+        os.makedirs(workspace, exist_ok=True)
+        ans = codex_bridge.run_codex_streaming(
+            prompt, workspace, sandbox, model, False, timeout_s, on_event, pin=False
+        )
+        swarm_watch.worker_finish(index, "done", ans, time.time() - start)
+        return WorkerResult(
+            index,
+            True,
+            answer=ans,
+            elapsed=round(time.time() - start, 1),
+            workspace=workspace,
+            backend="codex",
+        )
+    except Exception as e:  # noqa: BLE001
+        swarm_watch.worker_finish(index, "error", str(e), time.time() - start)
+        return WorkerResult(
+            index,
+            False,
+            error=str(e),
+            elapsed=round(time.time() - start, 1),
+            workspace=workspace,
+            backend="codex",
+        )
+
+
+def swarm_agents(
+    tasks,
+    max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    timeout_s: int = 180,
+    watch: bool = False,
+) -> list[WorkerResult]:
+    """Run a heterogeneous swarm: each task dispatches to its named backend's worker,
+    all concurrently in one pool (and, with watch, one shared dashboard).
+    """
+    norm = _normalize_tasks(tasks)
+    n = len(norm)
+    if n == 0:
+        return []
+    prompts = [t["prompt"] for t in norm]
+    workspaces = [t["workspace"] for t in norm]
+    backends = [t["backend"] for t in norm]
+    if watch:
+        import swarm_watch
+
+        swarm_watch.init(
+            _labels(prompts), _repos(workspaces), time.time(), prompts, timeout_s, backends=backends
+        )
+        swarm_watch.open_window(n)
+
+    def runner(i: int) -> WorkerResult:
+        t = norm[i]
+        if t["backend"] == "codex":
+            fn = _run_codex_worker_watched if watch else _run_codex_worker
+            return fn(i, t["prompt"], t["workspace"], t["sandbox"], t["model"], timeout_s)
+        fn = _run_text_worker_watched if watch else _run_text_worker
+        return fn(i, t["prompt"], t["workspace"], timeout_s)
+
+    results: list[Optional[WorkerResult]] = [None] * n
+    with ThreadPoolExecutor(max_workers=max(1, max_concurrency)) as ex:
+        futs = [ex.submit(runner, i) for i in range(n)]
+        for fut in futs:
+            r = fut.result()
+            r.backend = backends[r.index]  # authoritative, even if a runner left it blank
+            results[r.index] = r
+    return [r for r in results if r is not None]
+
+
+def format_agent_results(results: list[WorkerResult]) -> str:
+    """Render unified-swarm results as one block, tagged by backend per worker."""
+    parts = []
+    for r in sorted(results, key=lambda r: r.index):
+        head = f"[worker {r.index} · {r.backend or '?'}] {'OK' if r.ok else 'ERROR'} ({r.elapsed}s)"
+        if r.workspace:
+            head += f" @ {_basename_any(r.workspace)}"
+        body = r.answer if r.ok else f"(failed) {r.error}"
+        parts.append(f"{head}\n{body}")
+    ok = sum(1 for r in results if r.ok)
+    return f"agent swarm: {ok}/{len(results)} succeeded\n\n" + "\n\n".join(parts)

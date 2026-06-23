@@ -10,6 +10,28 @@ summary.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-06-23
+
+### Added
+
+- **Unified `agent_swarm`** — one swarm tool that runs a heterogeneous list of tasks across **both**
+  backends at once. Each task names its `backend` (`antigravity` or `codex`) plus a `prompt` (and,
+  for Codex, `sandbox`/`model`); workers run concurrently in one pool and, with `watch=true`, share
+  one **Agent Swarm** dashboard that now shows a per-worker backend badge.
+
+### Changed
+
+- **BREAKING** (despite the patch bump): removed `antigravity_swarm` and `codex_swarm` — use
+  `agent_swarm` instead, passing `tasks=[{"backend": "antigravity"|"codex", "prompt": ...}, ...]`.
+  `antigravity_image_swarm` is unchanged (Codex has no image model). Tool count 10 → 9.
+
+### Fixed
+
+- `test_codex.py`'s cwd test recursed infinitely on POSIX — a monkeypatched `os.getcwd` called
+  `os.path.abspath`, which re-enters `getcwd` when the path isn't absolute on that OS, so it only
+  passed on Windows. CI now also runs `test_codex.py` (it previously ran only `test_server.py` +
+  `test_swarm.py`), which surfaced it on Linux/macOS.
+
 ## [0.14.0] - 2026-06-23
 
 ### Changed
@@ -183,7 +205,8 @@ summary.
 
 - **BREAKING:** `antigravity_ask_stream` (superseded by watch mode).
 
-[Unreleased]: https://github.com/SinanTufekci/agent-intern/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/SinanTufekci/agent-intern/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/SinanTufekci/agent-intern/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/SinanTufekci/agent-intern/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/SinanTufekci/agent-intern/compare/v0.12.0...v0.12.1

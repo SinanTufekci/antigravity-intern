@@ -247,3 +247,116 @@ def test_dashboard_is_live_reflects_recent_poll(monkeypatch):
     # A poll within the alive window -> live, so a new run reuses the open dashboard.
     monkeypatch.setattr(swarm_watch, "_LAST_POLL", swarm_watch.time.time())
     assert swarm_watch._dashboard_is_live() is True
+
+
+# --------------------------------------------------------------------------
+# unified agent swarm: _normalize_tasks / swarm_agents / format_agent_results
+# --------------------------------------------------------------------------
+
+
+def test_normalize_tasks_mixed_and_aliases(tmp_path):
+    out = swarm._normalize_tasks(
+        [
+            {"backend": "agy", "prompt": "a", "workspace": str(tmp_path)},
+            {"backend": "Codex", "prompt": "b", "sandbox": "workspace-write", "model": "m"},
+            {"backend": "gemini", "prompt": "c"},
+        ]
+    )
+    assert [t["backend"] for t in out] == ["antigravity", "codex", "antigravity"]
+    assert out[0]["workspace"] == os.path.abspath(str(tmp_path))
+    assert out[1]["sandbox"] == "workspace-write" and out[1]["model"] == "m"
+    # antigravity drops codex-only fields and defaults workspace to cwd
+    assert out[2]["sandbox"] is None and out[2]["model"] is None
+    assert out[2]["workspace"] == os.getcwd()
+
+
+def test_normalize_tasks_codex_default_sandbox():
+    import codex_bridge
+
+    out = swarm._normalize_tasks([{"backend": "codex", "prompt": "x"}])
+    assert out[0]["sandbox"] == codex_bridge.DEFAULT_SANDBOX
+
+
+def test_normalize_tasks_antigravity_ignores_sandbox_model():
+    out = swarm._normalize_tasks(
+        [{"backend": "antigravity", "prompt": "x", "sandbox": "danger-full-access", "model": "z"}]
+    )
+    assert out[0]["sandbox"] is None and out[0]["model"] is None
+
+
+def test_normalize_tasks_bad_backend_raises():
+    with pytest.raises(ValueError):
+        swarm._normalize_tasks([{"backend": "llama", "prompt": "x"}])
+
+
+def test_normalize_tasks_missing_prompt_raises():
+    with pytest.raises(ValueError):
+        swarm._normalize_tasks([{"backend": "codex", "prompt": "  "}])
+
+
+def test_normalize_tasks_invalid_sandbox_raises():
+    with pytest.raises(ValueError):
+        swarm._normalize_tasks([{"backend": "codex", "prompt": "x", "sandbox": "yolo"}])
+
+
+def test_normalize_tasks_non_list_and_non_dict_raise():
+    with pytest.raises(ValueError):
+        swarm._normalize_tasks("nope")
+    with pytest.raises(ValueError):
+        swarm._normalize_tasks([["not", "a", "dict"]])
+
+
+def test_swarm_agents_dispatches_by_backend(monkeypatch):
+    calls = []
+
+    def fake_text(index, prompt, workspace, timeout_s):
+        calls.append(("antigravity", index, prompt))
+        return swarm.WorkerResult(index, True, answer="agy:" + prompt, workspace=workspace)
+
+    def fake_codex(index, prompt, workspace, sandbox, model, timeout_s):
+        calls.append(("codex", index, prompt, sandbox, model))
+        return swarm.WorkerResult(index, True, answer="cdx:" + prompt, workspace=workspace)
+
+    monkeypatch.setattr(swarm, "_run_text_worker", fake_text)
+    monkeypatch.setattr(swarm, "_run_codex_worker", fake_codex)
+
+    results = swarm.swarm_agents(
+        [
+            {"backend": "antigravity", "prompt": "p0"},
+            {"backend": "codex", "prompt": "p1", "sandbox": "workspace-write", "model": "m"},
+        ],
+        max_concurrency=2,
+        timeout_s=5,
+        watch=False,
+    )
+    results.sort(key=lambda r: r.index)
+    assert results[0].backend == "antigravity" and results[0].answer == "agy:p0"
+    assert results[1].backend == "codex" and results[1].answer == "cdx:p1"
+    cdx = next(c for c in calls if c[0] == "codex")
+    assert cdx[3] == "workspace-write" and cdx[4] == "m"
+
+
+def test_swarm_agents_empty_returns_empty():
+    assert swarm.swarm_agents([]) == []
+
+
+def test_format_agent_results_tags_backend():
+    results = [
+        swarm.WorkerResult(
+            0, True, answer="ok", elapsed=1.0, workspace="C:\\x\\repo", backend="codex"
+        ),
+        swarm.WorkerResult(1, False, error="boom", elapsed=0.0, backend="antigravity"),
+    ]
+    out = swarm.format_agent_results(results)
+    assert "1/2 succeeded" in out
+    assert "[worker 0 · codex]" in out and "[worker 1 · antigravity]" in out
+    assert "ok" in out and "boom" in out
+
+
+def test_watch_init_stores_backends():
+    swarm_watch.init(
+        ["p0", "p1"], ["r0", "r1"], 1.0, ["p0", "p1"], 180, backends=["antigravity", "codex"]
+    )
+    snap = swarm_watch._snapshot()
+    assert snap["workers"][0]["backend"] == "antigravity"
+    assert snap["workers"][1]["backend"] == "codex"

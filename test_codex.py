@@ -303,8 +303,11 @@ def test_watch_lines_ignores_noise():
 
 
 def test_broadcast_workspaces_none_is_cwd(monkeypatch):
-    monkeypatch.setattr(os, "getcwd", lambda: os.path.abspath("C:\\cwd"))
-    assert codex_bridge._broadcast_workspaces(None, 3) == [os.path.abspath("C:\\cwd")] * 3
+    # A static absolute path — NOT os.path.abspath(), which would re-enter the
+    # monkeypatched getcwd on POSIX (the path isn't absolute there) and recurse.
+    fake = os.path.join(os.sep, "fake", "cwd")
+    monkeypatch.setattr(os, "getcwd", lambda: fake)
+    assert codex_bridge._broadcast_workspaces(None, 3) == [fake] * 3
 
 
 def test_broadcast_workspaces_single_broadcasts():

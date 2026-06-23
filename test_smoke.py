@@ -10,10 +10,10 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 
 from server import (  # noqa: E402  (after stdout/stderr rewrap above)
     _detect_image_format,
+    agent_swarm,
     antigravity_ask,
     antigravity_continue,
     antigravity_image,
-    antigravity_swarm,
 )
 
 
@@ -57,12 +57,18 @@ def main() -> int:
     assert _detect_image_format(final), f"not a recognized image: {final}"
     print("PASS")
 
-    print("\n=== smoke 4: antigravity_swarm runs prompts in parallel ===")
+    print("\n=== smoke 4: agent_swarm runs tasks in parallel ===")
     t0 = time.time()
-    resp4 = antigravity_swarm(
-        prompts=[
-            "Reply with exactly this token and nothing else: ALPHA",
-            "Reply with exactly this token and nothing else: BETA",
+    resp4 = agent_swarm(
+        tasks=[
+            {
+                "backend": "antigravity",
+                "prompt": "Reply with exactly this token and nothing else: ALPHA",
+            },
+            {
+                "backend": "antigravity",
+                "prompt": "Reply with exactly this token and nothing else: BETA",
+            },
         ],
         max_concurrency=2,
         timeout_s=120,

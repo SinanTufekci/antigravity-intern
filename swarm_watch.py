@@ -47,11 +47,13 @@ def init(
     start: float,
     prompts: Optional[list[str]] = None,
     timeout: float = 0.0,
+    backends: Optional[list[str]] = None,
 ) -> None:
     """Seed dashboard state. `labels` are the short, single-line row captions;
     `prompts` (optional) are the full untruncated prompts shown in each worker's
     detail window (falls back to the label when omitted). `timeout` is the
-    per-worker timeout_s, used to draw each row's time progress bar.
+    per-worker timeout_s, used to draw each row's time progress bar. `backends`
+    (optional) is the per-worker backend name shown as a small row badge.
     """
     with _LOCK:
         _STATE["started"] = start
@@ -62,6 +64,7 @@ def init(
                 "label": labels[i],
                 "prompt": prompts[i] if prompts and i < len(prompts) else labels[i],
                 "repo": repos[i] if i < len(repos) else "",
+                "backend": backends[i] if backends and i < len(backends) else "",
                 "status": "queued",
                 "elapsed": 0.0,
                 "events": [],
@@ -272,6 +275,9 @@ header{display:flex;align-items:center;gap:9px;padding:7px 11px;background:#0d0f
 @keyframes pulse{50%{opacity:.3}}
 @keyframes pop{0%{transform:scale(.2)}55%{transform:scale(1.5)}100%{transform:scale(1)}}
 .repo{color:#0a0c10;background:var(--green);border-radius:4px;padding:0 5px;font-size:9.5px;font-weight:700;flex:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.bk{border-radius:4px;padding:0 5px;font-size:9px;font-weight:700;flex:none;margin-top:1px;letter-spacing:.3px}
+.bk.codex{color:#0a0c10;background:#7c9cff}
+.bk.antigravity{color:#0a0c10;background:#f5b94a}
 .prompt{color:#e9eef3;font-weight:600;flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-word}
 .st{color:var(--dim);font-size:10.5px;flex:none;font-variant-numeric:tabular-nums;margin-top:1px}
 .pop{color:var(--green);opacity:.55;flex:none;font-size:11px;margin-top:1px}
@@ -311,6 +317,7 @@ function build(ws){
   const p=document.createElement("div");p.className="pane "+w.status;p.id="p"+w.index;
   p.title="click to open this agent's full step log";p.onclick=()=>openWorker(w.index);
   p.innerHTML="<div class='r1'><span class='dot'></span>"+
+   (w.backend?"<span class='bk "+w.backend+"' title='"+esc(w.backend)+"'>"+(w.backend==='codex'?'codex':'agy')+"</span>":"")+
    (w.repo?"<span class='repo' title='"+esc(w.repo)+"'>"+esc(w.repo)+"</span>":"")+
    "<span class='prompt' title='"+esc(w.label)+"'>"+esc(w.label||("Worker "+w.index))+"</span>"+
    "<span class='st' id='st"+w.index+"'></span><span class='pop'>↗</span></div>"+

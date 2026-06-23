@@ -337,6 +337,7 @@ def run_codex_streaming(
     continue_conv: bool = False,
     timeout_s: int = 180,
     on_event=None,
+    pin: bool = True,
 ) -> str:
     """Run `codex exec --json` and stream events live, returning the final answer.
 
@@ -405,7 +406,7 @@ def run_codex_streaming(
                 f"codex produced no final message (empty -o file). stderr: {(stderr or '')[-300:]}"
             )
 
-        if not continue_conv:
+        if not continue_conv and pin:
             sid = _capture_new_session(before)
             if sid:
                 _pin(workspace, sid)

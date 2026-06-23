@@ -38,7 +38,8 @@ without leaving your terminal.
 
 > [!NOTE]
 > **Now with OpenAI Codex too.** The same bridge exposes `codex_ask` / `codex_continue` /
-> `codex_swarm` / `codex_status` (the single-prompt tools take a `watch=true` flag), driving OpenAI's `codex exec` on your existing
+> `codex_status` (the single-prompt tools take a `watch=true` flag) — and Codex can join the unified
+> `agent_swarm` alongside Antigravity — driving OpenAI's `codex exec` on your existing
 > Codex login. Codex is the *well-behaved* sibling: it writes its answer straight to a file the bridge
 > requests (no transcript-scraping), supports model selection, and has a **real** sandbox. See
 > [Codex bridge](#codex-bridge).
@@ -148,7 +149,7 @@ Then point Claude Code at the absolute path to `server.py` under `mcpServers` in
 </td></tr>
 </table>
 
-Restart Claude Code. **Ten tools** appear — six for Antigravity (**`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_image`**, **`antigravity_swarm`**, **`antigravity_image_swarm`**, **`antigravity_status`**) and four for Codex (**`codex_ask`**, **`codex_continue`**, **`codex_swarm`**, **`codex_status`**) — each prefixed `mcp__agent-intern__`. The single-prompt tools — Antigravity **and** Codex — take a **`watch=true`** flag for the live browser view.
+Restart Claude Code. **Nine tools** appear — five for Antigravity (**`antigravity_ask`**, **`antigravity_continue`**, **`antigravity_image`**, **`antigravity_image_swarm`**, **`antigravity_status`**), three for Codex (**`codex_ask`**, **`codex_continue`**, **`codex_status`**), and one unified **`agent_swarm`** that fans a list of tasks out across **both** backends in one run — each prefixed `mcp__agent-intern__`. The single-prompt tools — Antigravity **and** Codex — take a **`watch=true`** flag for the live browser view.
 
 > *"Use antigravity_ask to summarize the README of this repo in three bullets."* → Claude routes the prompt
 > through the bridge, agy reads the file under the workspace root, and the answer comes back as a
@@ -161,7 +162,7 @@ Restart Claude Code. **Ten tools** appear — six for Antigravity (**`antigravit
 | `antigravity_ask(prompt, workspace?, timeout_s?=180, watch?=false)` | Start a **new** Antigravity conversation. Pass `watch=true` to open the live browser view (see [Watch mode](#watch-mode)). |
 | `antigravity_continue(prompt, workspace?, timeout_s?=180, watch?=false)` | Continue the conversation **rooted at `workspace`** (pinned by id). `watch=true` opens the live view. |
 | `antigravity_image(prompt, output_path?, workspace?, timeout_s?=240, watch?=false)` | Generate an image with Antigravity; saves the file (extension corrected to the real bytes) and returns its path + format/size. `watch=true` streams progress and **shows the image** inline. |
-| `antigravity_swarm(prompts, workspaces?, max_concurrency?=4, timeout_s?=180, watch?=false)` | Run **several prompts in parallel** as independent agy workers; returns every answer in one block (see [Swarm](#swarm)). |
+| `agent_swarm(tasks, max_concurrency?=4, timeout_s?=180, watch?=false)` | Run **several tasks in parallel across both backends** — each task names its `backend` (`antigravity` or `codex`) plus a `prompt` (and, for Codex, `sandbox`/`model`). Every answer comes back in one block; `watch=true` opens the live dashboard (see [Swarm](#swarm)). |
 | `antigravity_image_swarm(prompts, output_paths?, workspaces?, max_concurrency?=4, timeout_s?=240, watch?=false)` | Generate **several images in parallel** (one worker per prompt). |
 | `antigravity_status()` | Setup diagnostics: **the bridge's own version + whether a newer release is available**, plus agy version/compat, state dirs, and newest-transcript readability. Spends no quota. |
 
@@ -190,7 +191,6 @@ with `codex exec resume <id>`.
 |---|---|
 | `codex_ask(prompt, workspace?, sandbox?="read-only", model?, timeout_s?=180, watch?=false)` | Start a **new** Codex session. `sandbox` is a **real** boundary (see below); `model` selects the model (`-m`). `watch=true` opens the live browser view, streaming codex's steps from its `--json` event stream (same viewer as the Antigravity watch — see [Watch mode](#watch-mode)). |
 | `codex_continue(prompt, workspace?, timeout_s?=180, watch?=false)` | Continue the Codex session **rooted at `workspace`** — resumes the exact session id, falling back to the newest on-disk session for that cwd after a server restart. `watch=true` opens the live view. |
-| `codex_swarm(prompts, workspaces?, sandbox?, model?, max_concurrency?=4, timeout_s?=180)` | Run **several Codex prompts in parallel** as independent one-shot workers; every result in one block. |
 | `codex_status()` | Setup diagnostics: codex version, login status (`codex login status`), sessions dir. Spends no quota. |
 
 **How it differs from the Antigravity tools**
@@ -260,52 +260,59 @@ read live from the transcript, with the final answer rendered as Markdown (and, 
 
 <a id="swarm"></a>
 
-## 🐝 Swarm — run agy workers in parallel
+## 🐝 Swarm — run agents in parallel
 
-`antigravity_swarm` and `antigravity_image_swarm` fan a list of prompts out to
-**independent agy workers that run truly concurrently** (capped at
-`max_concurrency`, default 4), then return every worker's result in one block.
-Good for independent, cheap sub-tasks — summarise N files, ask the same question
-about N repos, generate N images — without paying for them one at a time.
+`agent_swarm` fans a list of **tasks** out to workers that run **truly
+concurrently** (capped at `max_concurrency`, default 4), then returns every
+worker's result in one block. Each task names its own `backend`, so a **single
+swarm can mix Antigravity (Gemini) and Codex** workers — hand the reasoning-heavy
+jobs to Codex and the quick ones to Gemini, all at once. Good for independent
+sub-tasks: summarise N files, ask the same question about N repos, fix N bugs.
+(`antigravity_image_swarm` stays separate — it generates N images, and only agy
+has an image model.)
 
 ```
-antigravity_swarm(prompts=[
-  "Summarise src/auth.py in 2 bullets.",
-  "Summarise src/db.py in 2 bullets.",
-  "List the public functions in src/api.py.",
+agent_swarm(tasks=[
+  {"backend": "antigravity", "prompt": "Summarise src/auth.py in 2 bullets."},
+  {"backend": "antigravity", "prompt": "List the public functions in src/api.py."},
+  {"backend": "codex", "prompt": "Find and fix the failing test in tests/",
+   "sandbox": "workspace-write", "workspace": "./repo"},
 ])
 ```
 
 <div align="center">
-<img src="assets/watch-swarm.gif" width="62%" alt="Agent Swarm dashboard: three agy workers running in parallel, each row showing its repo, prompt, latest step and a per-worker time bar, while the overall done/total counter climbs 0/3 → 2/3 → 3/3">
+<img src="assets/watch-swarm.gif" width="62%" alt="Agent Swarm dashboard: workers running in parallel, each row showing its backend badge, repo, prompt, latest step and a per-worker time bar, while the overall done/total counter climbs">
 <br>
-<sub><code>antigravity_swarm(..., watch=true)</code> — one row per worker; the done/total bar climbs as workers finish. Click a row (or <b>↑/↓</b> then <b>↵</b>) to pop that agent into its own window.</sub>
+<sub><code>agent_swarm(..., watch=true)</code> — one row per worker (with a backend badge); the done/total bar climbs as workers finish. Click a row (or <b>↑/↓</b> then <b>↵</b>) to pop that agent into its own window.</sub>
 </div>
 
-**How it stays correct under concurrency.** The single-agent tools serialize
+**How it stays correct under concurrency.** The single-agent agy tools serialize
 through a lock because agy rewrites `last_conversations.json` on every call, so
-concurrent runs sharing one state dir would race. The swarm sidesteps this
-entirely: each worker runs with its **own isolated `HOME`/`USERPROFILE`**, so
-agy's `brain/`, `cache/`, and `last_conversations.json` never collide — no lock
-needed. Auth still works because agy reads it from the **OS credential store**,
-not from `~/.gemini` (verified on agy 1.0.9). Each worker's `cwd` is still its
-real `workspace`, so file access there is unchanged — HOME redirection isolates
-*state only*. Measured ~**2.8× speedup at 3 workers** (the AI Pro backend does
-not serialize per-account); higher `max_concurrency` trades quota/rate-limit
-pressure for wall-clock.
+concurrent runs sharing one state dir would race. The swarm sidesteps this: each
+**agy** worker runs with its **own isolated `HOME`/`USERPROFILE`**, so agy's
+`brain/`, `cache/`, and `last_conversations.json` never collide — no lock needed.
+Auth still works because agy reads it from the **OS credential store**, not from
+`~/.gemini` (verified on agy 1.0.9). **Codex** workers need no such isolation —
+each is a fresh one-shot `codex exec` with its own `-o` output file. Each worker's
+`cwd` is its real `workspace`, so file access is unchanged. Measured ~**2.8×
+speedup at 3 agy workers** (the AI Pro backend does not serialize per-account);
+higher `max_concurrency` trades quota/rate-limit pressure for wall-clock.
 
-- **`workspaces`** — omit for the server cwd; pass a **1-item list** to point every
-  worker at the same dir; pass **one entry per prompt** for per-worker dirs.
+- **Per-task fields** — `backend` (`antigravity`/`codex`) and `prompt` are
+  required; `workspace` defaults to the server cwd; `sandbox` and `model` apply to
+  **Codex only** (ignored for Antigravity). Swarm workers are **one-shot** — there
+  is no `*_continue` for a swarm worker's session.
 - **Error isolation** — a worker that fails is reported in place; the others still
   return.
 - **`watch=true`** — opens a thin live **Agent Swarm** dashboard (one row per
-  worker showing the repo, prompt, and latest step). **Click a row** to pop that
-  agent out into its own window streaming its full step log, beside the dashboard.
+  worker, with a **backend badge**, repo, prompt, and latest step). **Click a row**
+  to pop that agent into its own window streaming its full step log.
 
 > [!WARNING]
-> A swarm launches **N unsandboxed agy agents at once** — N× the prompt-injection
+> A swarm launches **N unsandboxed agents at once** — N× the prompt-injection
 > "lethal trifecta" surface of a single call (see [Security](#security)). Only use
-> it with **trusted prompts on trusted content**.
+> it with **trusted prompts on trusted content**. Codex workers honor their
+> `sandbox`; Antigravity workers have no real boundary.
 
 ## Model & auth
 
@@ -425,9 +432,9 @@ The **single-agent** tools (`antigravity_ask` / `antigravity_continue` / `antigr
 runs sharing one state dir would race and could return the wrong conversation. A `threading.Lock`
 makes extra requests queue rather than race.
 
-For real parallelism use **[`antigravity_swarm`](#swarm)** — it runs each worker in its own isolated
-state dir, so they don't race and the lock isn't needed (~2.8× at 3 workers). That's the supported
-way to run many agy calls at once.
+For real parallelism use **[`agent_swarm`](#swarm)** — each agy worker runs in its own isolated
+state dir (and Codex workers need none), so they don't race and the lock isn't needed (~2.8× at 3
+workers). That's the supported way to run many calls at once, across either backend.
 </details>
 
 ## Status & caveats
