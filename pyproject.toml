@@ -1,6 +1,6 @@
 [project]
 name = "agent-intern"
-version = "0.15.0"
+version = "0.15.1"
 description = "MCP server bridging the Antigravity (agy) and OpenAI Codex CLIs so Claude Code can drive them as sub-agents"
 readme = "README.md"
 requires-python = ">=3.10"

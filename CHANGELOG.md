@@ -10,6 +10,20 @@ summary.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-06-24
+
+### Changed
+
+- **Verified against agy 1.0.11.** Bumped `VERIFIED_AGY_VERSION` to `(1, 0, 11)`, silencing the
+  startup compat warning and the status tool's "newer than verified" row. 1.0.11 is entirely
+  interactive-TUI / keybindings / additive-env-var work (ctrl+c/ctrl+d handling, `/resume`, the
+  ctrl+g AltScreen tool-confirmation view, keybinding validation and lazy `keybindings.json`
+  creation, `USE_ADC` ADC auth, `AGY_CLI_CMD_OUTPUT_PERCENTAGE`, command-output/ANSI/VCS-tree
+  rendering) — none of which the headless `agy -p` path uses. Its one auth change (return an empty
+  config when unsigned in) touches agy's own config read; the bridge never reads agy's config, only
+  state-file paths and the transcript. State-file layout, `last_conversations.json`, and the
+  transcript schema (JSONL + SQLite fallback) are unchanged — re-confirmed via the status tool.
+
 ## [0.15.0] - 2026-06-23
 
 ### Added
