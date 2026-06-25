@@ -222,7 +222,8 @@ def test_compat_warning_warns_for_newer_version():
     msg = server._compat_warning((1, 1, 0))
     assert msg is not None
     assert "1.1.0" in msg  # the detected version
-    assert "1.0.11" in msg  # the verified baseline it's compared to
+    # the verified baseline it's compared to (derived so this survives bumps)
+    assert ".".join(map(str, server.VERIFIED_AGY_VERSION)) in msg
 
 
 def test_compat_warning_none_when_version_unknown():

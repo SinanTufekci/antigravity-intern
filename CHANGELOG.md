@@ -10,6 +10,25 @@ summary.
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-06-25
+
+### Changed
+
+- **Verified against agy 1.0.12.** Bumped `VERIFIED_AGY_VERSION` to `(1, 0, 12)`, silencing the
+  startup compat warning and the status tool's "newer than verified" row. Confirmed with a live
+  round-trip (`antigravity_status` green on every row, ask round-trip returns clean text): state-file
+  paths, `last_conversations.json` (still keyed by workspace path), and the transcript schema (JSONL
+  still primary, SQLite fallback intact) are unchanged. 1.0.12 is interactive-TUI / rendering /
+  keybinding / network-layer work — `--project`/`--new-project` flags and the "default project
+  regardless of active workspace" resolution change, Esc-confirm in comment mode, OSC8 hyperlinks,
+  reverse diff cycling, ctrl+o scrollback, Makefile/LaTeX code-block rendering, the AES-NI/DPI TLS
+  fix, and backtab/pgdown key-string fixes — none of which the headless `agy -p` path uses. The new
+  permission-config precedence (per-project files under `~/.gemini/config/projects/` now outrank
+  `~/.gemini/antigravity-cli/settings.json`) is config the bridge never reads; the `model` field
+  still lives in `settings.json`, and permissions still do not gate `-p`, so the security posture is
+  unchanged. The bridge passes no `--project` flag — it relies on `cwd=workspace` plus conversation
+  pinning, both verified intact.
+
 ## [0.15.1] - 2026-06-24
 
 ### Changed

@@ -12,7 +12,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP server](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io/)
 [![Glama](https://glama.ai/mcp/servers/SinanTufekci/agent-intern/badges/score.svg)](https://glama.ai/mcp/servers/SinanTufekci/agent-intern)
-[![agy 1.0.10 verified](https://img.shields.io/badge/agy-1.0.10%20verified-2ea44f)](https://antigravity.google/)
+[![agy 1.0.12 verified](https://img.shields.io/badge/agy-1.0.12%20verified-2ea44f)](https://antigravity.google/)
 [![platform](https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-lightgrey)](#requirements)
 [![Sponsor](https://img.shields.io/github/sponsors/SinanTufekci?logo=githubsponsors&label=Sponsor&color=ea4aaa)](https://github.com/sponsors/SinanTufekci)
 
@@ -341,7 +341,10 @@ empirically on **agy 1.0.9 / Windows** (all three checks below still hold):
   that disables tool execution in print mode.
 - agy 1.0.5 integrated a permission system (its logs show `toolPermission=request-review`), but it
   **still does not gate print-mode execution** — a fresh `-p` run created a file outside the
-  workspace with no prompt.
+  workspace with no prompt. agy 1.0.12 reshuffled how that permission config *merges* (per-project
+  files under `~/.gemini/config/projects/` now take precedence over
+  `~/.gemini/antigravity-cli/settings.json`), but that's a config-layer change — it adds no
+  print-mode approval gate, and the bridge reads none of it.
 - `--sandbox` is **not** a usable boundary. agy 1.0.6 fixed its propagation into `-p` (the 1.0.6/1.0.7
   changelog calls this "sandbox isolation correctly enforced") and it now **does** block terminal/
   shell command execution — but re-verified on 1.0.9 that it leaves the `write_to_file` tool and
@@ -378,10 +381,10 @@ apply, and you're responsible for staying within them.
 <summary><b>Will it break when agy updates?</b></summary>
 
 Possibly — it reads agy's **internal, undocumented** state files, so a release can change paths or
-schemas and break it silently. Re-verified working on **1.0.10** (transcript schema and `-p` JSONL
+schemas and break it silently. Re-verified working on **1.0.12** (transcript schema and `-p` JSONL
 output unchanged; live ask round-trip + `antigravity_status` diagnostics pass). The big looming change
 is agy's **SQLite (`.db`) conversation format** (added in 1.0.4, slated to become the default): agy
-1.0.10 still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
+1.0.12 still **dual-writes** every conversation to `~/.gemini/antigravity-cli/conversations/<id>.db`
 alongside the JSONL transcript. The bridge is **ready for it** — `_read_response` reads the JSONL when
 present and **falls back to the `.db`** (parsing the `steps` table's protobuf payload) when it isn't,
 which already happens for `--sandbox` runs. Verified to match the JSONL answer across 100+ local
@@ -442,15 +445,18 @@ workers). That's the supported way to run many calls at once, across either back
 
 ## Status & caveats
 
-- ✅ **Verified on agy 1.0.10** — base dir, `last_conversations.json`, the
-  `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
-  flags are all unchanged; a live ask round-trip + `antigravity_status` diagnostics pass. The 1.0.5
+- ✅ **Verified on agy 1.0.12** — base dir, `last_conversations.json` (still keyed by workspace path),
+  the `brain/.../transcript.jsonl` path, the transcript schema, and the `-p`/`-c`/`--print-timeout`
+  flags are all unchanged; a live ask round-trip + `antigravity_status` diagnostics pass. 1.0.12's
+  new `--project`/`--new-project` flags and per-project permission configs under
+  `~/.gemini/config/projects/` don't touch the print-mode path — the bridge passes no `--project`
+  and never reads agy's config. The 1.0.5
   `-p` metadata fix also means agy no longer litters the workspace dir.
 - 🖥️ **Console-detach (new)** — agy `-p` writes its progress/answer to the *controlling terminal*,
   not stdout; under a TUI that text leaks into the host's prompt (seen on 1.0.9 before the fix). The
   bridge now spawns agy detached from the terminal (`CREATE_NO_WINDOW` / a new POSIX session), so it
   can't leak; the answer is still read from the transcript.
-- 💾 **SQLite migration — handled** — agy 1.0.10 still dual-writes a `.db` per conversation; when the
+- 💾 **SQLite migration — handled** — agy 1.0.12 still dual-writes a `.db` per conversation; when the
   JSONL transcript is absent (already true for `--sandbox` runs, and the announced future default)
   `_read_response` falls back to reading the `.db`, verified to match across 100+ conversations. See
   the [FAQ](#faq).
@@ -467,7 +473,7 @@ workers). That's the supported way to run many calls at once, across either back
 ## Requirements
 
 - Python 3.10+
-- **For the Antigravity tools:** [`agy`](https://antigravity.google/) 1.0.0+ on `PATH` (state-file layout re-verified on **1.0.10**) and an active Antigravity / AI Pro session
+- **For the Antigravity tools:** [`agy`](https://antigravity.google/) 1.0.0+ on `PATH` (state-file layout re-verified on **1.0.12**) and an active Antigravity / AI Pro session
 - **For the Codex tools:** [`codex`](https://developers.openai.com/codex/) on `PATH` and logged in (`codex login`) — verified on **codex-cli 0.141.0**
 
 Each backend is independent — install only the CLI(s) you plan to use; the other tools simply report "not found" via their `*_status` tool.
